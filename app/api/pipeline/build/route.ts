@@ -12,6 +12,9 @@ export const maxDuration = 300
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const leadIds: string[] = body.leadIds ?? []
+  // Client passes full lead objects to avoid cross-instance /tmp misses on Vercel.
+  // Fall back to reading /tmp only when leads are not provided (e.g. direct API calls).
+  const clientLeads: Lead[] = body.leads ?? []
 
   if (leadIds.length === 0) {
     return new Response('leadIds is required', { status: 400 })
@@ -26,8 +29,8 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const allLeads = getLeads()
-        const toBuild = allLeads.filter(l => leadIds.includes(l.id))
+        const source = clientLeads.length > 0 ? clientLeads : getLeads()
+        const toBuild = source.filter(l => leadIds.includes(l.id))
 
         if (toBuild.length === 0) {
           send({ type: 'error', message: 'No matching leads found — run discovery first' })

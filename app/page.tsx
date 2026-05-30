@@ -306,13 +306,16 @@ export default function Home() {
   const runBuild = async () => {
     const ids = Array.from(selectedLeadIds)
     if (ids.length === 0) return
+    // Pass full lead data so the build route doesn't rely on /tmp surviving
+    // across separate Vercel serverless invocations.
+    const selectedLeads = leads.filter(l => ids.includes(l.id))
     setAppStage('building')
     setBuildLog([])
     setExpandedLead(null)
     try {
       await readStream(
         '/api/pipeline/build',
-        { leadIds: ids },
+        { leadIds: ids, leads: selectedLeads },
         (event) => {
           if (event.type === 'lead_complete') {
             setLeads(prev => prev.map(l => l.id === event.lead.id ? event.lead : l))
