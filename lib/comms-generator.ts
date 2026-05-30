@@ -12,12 +12,12 @@ const COMM_LABELS: Record<Communication['id'], string> = {
 }
 
 export async function generateCommunications(lead: Pick<Lead, 'business' | 'type' | 'phone' | 'rating' | 'reviews' | 'address' | 'siteUrl'>): Promise<Communication[]> {
-  const message = await client.messages.create({
+  const requestParams = {
     model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     messages: [
       {
-        role: 'user',
+        role: 'user' as const,
         content: `Generate personalized outreach scripts for this local business. Return ONLY valid JSON — no explanation, no markdown.
 
 BUSINESS:
@@ -38,12 +38,24 @@ Generate exactly this JSON shape:
 }`,
       },
     ],
-  })
+  }
 
-  const content = message.content[0]
-  if (content.type !== 'text') throw new Error('Unexpected Claude response')
+  let raw: string | undefined
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const message = await client.messages.create(requestParams)
+      const content = message.content[0]
+      if (content.type !== 'text') throw new Error('Unexpected Claude response')
+      raw = content.text.trim()
+      break
+    } catch (err) {
+      lastErr = err
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt))
+    }
+  }
+  if (raw === undefined) throw lastErr
 
-  let raw = content.text.trim()
   raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
 
   const parsed = JSON.parse(raw) as Record<Communication['id'], string>

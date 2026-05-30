@@ -15,12 +15,12 @@ export async function generateSite(place: PlaceResult): Promise<string> {
     .map(r => `"${r.text!.text}" — ${r.authorAttribution?.displayName ?? 'Customer'}, ${r.rating}★`)
     .join('\n')
 
-  const message = await client.messages.create({
+  const requestParams = {
     model: 'claude-sonnet-4-6',
     max_tokens: 8000,
     messages: [
       {
-        role: 'user',
+        role: 'user' as const,
         content: `Build a complete, polished, single-file HTML website for this local business. Output ONLY valid HTML starting with <!DOCTYPE html> — no markdown, no backticks, no explanation. Just the raw HTML file.
 
 BUSINESS DATA:
@@ -62,14 +62,25 @@ COPYWRITING RULES:
 Put all CSS in <style> tags in <head>. Put all JS in <script> tags before </body>. No external CSS or JS libraries — vanilla only.`,
       },
     ],
-  })
+  }
 
-  const content = message.content[0]
-  if (content.type !== 'text') throw new Error('Unexpected Claude response type')
+  // Retry up to 3 times on transient network errors ("Load failed", connection reset, etc.)
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const message = await client.messages.create(requestParams)
+      const content = message.content[0]
+      if (content.type !== 'text') throw new Error('Unexpected Claude response type')
 
-  let html = content.text.trim()
-  // Strip any accidental markdown code fences
-  html = html.replace(/^```html\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
+      let html = content.text.trim()
+      // Strip any accidental markdown code fences
+      html = html.replace(/^```html\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
 
-  return html
+      return html
+    } catch (err) {
+      lastErr = err
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt))
+    }
+  }
+  throw lastErr
 }
