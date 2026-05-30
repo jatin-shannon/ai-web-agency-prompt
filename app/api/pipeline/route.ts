@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { put } from '@vercel/blob'
 import { searchBusinesses } from '@/lib/places'
 import { checkWebsite } from '@/lib/website-checker'
 import { generateSite } from '@/lib/site-generator'
@@ -17,6 +18,9 @@ function getBestCallTime(hours?: PlaceResult['regularOpeningHours']): string {
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const city: string = (body.city ?? '').trim()
+  const placeId: string = (body.placeId ?? '').trim()
+  const searchMode: string = body.searchMode ?? 'area'
+  const radiusKm: number = Math.max(1, Math.min(50, Number(body.radiusKm) || 5))
 
   if (!city) {
     return new Response('City is required', { status: 400 })
@@ -32,7 +36,10 @@ export async function POST(request: NextRequest) {
 
       try {
         clearLeads()
-        send({ type: 'status', message: `Starting pipeline for ${city}…` })
+
+        const modeDesc =
+          searchMode === 'radius' && placeId ? `within ${radiusKm} km of ${city}` : city
+        send({ type: 'status', message: `Starting pipeline for ${modeDesc}…` })
 
         const spent = currentSpendUsd().toFixed(2)
         const remaining = remainingBudgetUsd().toFixed(2)
@@ -46,7 +53,10 @@ export async function POST(request: NextRequest) {
 
         let businesses: PlaceResult[]
         try {
-          businesses = await searchBusinesses(city)
+          businesses = await searchBusinesses(
+            city,
+            searchMode === 'radius' && placeId ? { placeId, radiusKm } : undefined,
+          )
         } catch (err) {
           send({ type: 'error', message: `Google Places API error: ${String(err)}` })
           controller.close()
@@ -82,6 +92,7 @@ export async function POST(request: NextRequest) {
               send({ type: 'skip', message: `Skipping ${name} — has a working website` })
               continue
             }
+            // Facebook / Yelp / Instagram pages are treated as no real website — business qualifies
           }
 
           send({
@@ -103,24 +114,34 @@ export async function POST(request: NextRequest) {
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '')
 
+          // Upload HTML to Vercel Blob for a stable, globally-accessible URL.
+          // Falls back to the /api/sites route when BLOB_READ_WRITE_TOKEN is not set.
+          let siteUrl = `/api/sites/${slug}`
+          if (process.env.BLOB_READ_WRITE_TOKEN) {
+            try {
+              const blob = await put(`sites/${slug}.html`, siteHtml, {
+                access: 'public',
+                contentType: 'text/html',
+                addRandomSuffix: false,
+              })
+              siteUrl = blob.url
+            } catch (err) {
+              send({ type: 'status', message: `Blob upload failed for ${name}, using fallback URL` })
+            }
+          }
+
           send({ type: 'status', message: `Writing call scripts for ${name}…` })
           let communications: Lead['communications'] = []
           try {
-            const partialLead = {
-              id: slug,
+            communications = await generateCommunications({
               business: name,
               type: biz.primaryTypeDisplayName?.text ?? 'Local Business',
               phone: biz.nationalPhoneNumber!,
               address: biz.formattedAddress,
               rating: biz.rating ?? 0,
               reviews: biz.userRatingCount ?? 0,
-              siteUrl: `/api/sites/${slug}`,
-              bestCallTime: getBestCallTime(biz.regularOpeningHours),
-              hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
-              status: '🔴 Not Contacted',
-              communications: [],
-            }
-            communications = await generateCommunications(partialLead)
+              siteUrl,
+            })
           } catch (err) {
             send({ type: 'error', message: `Comms generation failed for ${name}: ${String(err)}` })
           }
@@ -133,26 +154,26 @@ export async function POST(request: NextRequest) {
             address: biz.formattedAddress,
             rating: biz.rating ?? 0,
             reviews: biz.userRatingCount ?? 0,
-            siteUrl: `/api/sites/${slug}`,
+            siteUrl,
             bestCallTime: getBestCallTime(biz.regularOpeningHours),
             hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
             status: '🔴 Not Contacted',
             communications,
-            htmlContent: siteHtml,
+            // Only store htmlContent when Blob is not available (fallback path)
+            htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
           }
 
           saveLead(lead)
           leads.push(lead)
 
-          // Don't send htmlContent over SSE — too large
-          const { htmlContent: _, ...leadWithoutHtml } = lead
-          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead: leadWithoutHtml })
+          const { htmlContent: _h, ...leadForStream } = lead
+          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead: leadForStream })
         }
 
         send({
           type: 'done',
           message: `Pipeline complete — ${leads.length} lead${leads.length !== 1 ? 's' : ''} generated`,
-          leads: leads.map(({ htmlContent: _, ...l }) => l),
+          leads: leads.map(({ htmlContent: _h, ...l }) => l),
         })
       } catch (err) {
         send({ type: 'error', message: `Unexpected error: ${String(err)}` })

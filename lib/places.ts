@@ -25,17 +25,60 @@ const SEARCH_CATEGORIES = [
   'florist OR boutique',
 ]
 
-export async function searchBusinesses(city: string): Promise<PlaceResult[]> {
+async function getPlaceCoords(
+  placeId: string,
+  apiKey: string,
+): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+      headers: {
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'location',
+      },
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const loc = data.location
+    if (loc?.latitude != null && loc?.longitude != null) {
+      return { lat: loc.latitude, lng: loc.longitude }
+    }
+  } catch {}
+  return null
+}
+
+export async function searchBusinesses(
+  city: string,
+  opts?: { placeId?: string; radiusKm?: number },
+): Promise<PlaceResult[]> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY is not configured')
 
-  // Throws if this run would push monthly Google spend over budget
   assertBudget(SEARCH_CATEGORIES.length)
+
+  // Resolve location bias when a placeId + radius are both provided
+  let locationBias: object | undefined
+  if (opts?.placeId && opts?.radiusKm) {
+    const coords = await getPlaceCoords(opts.placeId, apiKey)
+    if (coords) {
+      locationBias = {
+        circle: {
+          center: { latitude: coords.lat, longitude: coords.lng },
+          radius: opts.radiusKm * 1000,
+        },
+      }
+    }
+  }
 
   const results: PlaceResult[] = []
   const seen = new Set<string>()
 
   for (const category of SEARCH_CATEGORIES) {
+    const body: Record<string, unknown> = {
+      textQuery: `${category} in ${city}`,
+      maxResultCount: 10,
+    }
+    if (locationBias) body.locationBias = locationBias
+
     const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
@@ -43,10 +86,7 @@ export async function searchBusinesses(city: string): Promise<PlaceResult[]> {
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': FIELD_MASK,
       },
-      body: JSON.stringify({
-        textQuery: `${category} in ${city}`,
-        maxResultCount: 10,
-      }),
+      body: JSON.stringify(body),
     })
 
     if (!response.ok) {
@@ -64,8 +104,6 @@ export async function searchBusinesses(city: string): Promise<PlaceResult[]> {
     }
 
     recordSearches(1)
-
-    // Respect rate limits
     await new Promise(r => setTimeout(r, 300))
   }
 
