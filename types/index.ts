@@ -14,11 +14,13 @@ export interface Lead {
   address: string
   rating: number
   reviews: number
-  siteUrl: string
+  siteUrl?: string           // present only after build phase
   bestCallTime: string
   hook: string
   status: string
+  stage: 'discovered' | 'built'
   communications: Communication[]
+  openingHours?: string[]   // stored during discovery for later site generation
   htmlContent?: string
 }
 
@@ -47,6 +49,7 @@ export type PipelineEvent =
   | { type: 'status'; message: string }
   | { type: 'skip'; message: string }
   | { type: 'lead'; message: string }
+  | { type: 'lead_discovered'; message: string; lead: Lead }
   | { type: 'lead_complete'; message: string; lead: Lead }
   | { type: 'done'; message: string; leads: Lead[] }
   | { type: 'error'; message: string }

@@ -55,12 +55,14 @@ export async function searchBusinesses(
 
   assertBudget(SEARCH_CATEGORIES.length)
 
-  // Resolve location bias when a placeId + radius are both provided
-  let locationBias: object | undefined
+  // Resolve location restriction when a placeId + radius are both provided.
+  // Uses locationRestriction (strict) rather than locationBias so radius searches
+  // don't return businesses outside the selected catchment area.
+  let locationRestriction: object | undefined
   if (opts?.placeId && opts?.radiusKm) {
     const coords = await getPlaceCoords(opts.placeId, apiKey)
     if (coords) {
-      locationBias = {
+      locationRestriction = {
         circle: {
           center: { latitude: coords.lat, longitude: coords.lng },
           radius: opts.radiusKm * 1000,
@@ -77,7 +79,7 @@ export async function searchBusinesses(
       textQuery: `${category} in ${city}`,
       maxResultCount: 10,
     }
-    if (locationBias) body.locationBias = locationBias
+    if (locationRestriction) body.locationRestriction = locationRestriction
 
     const response = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
