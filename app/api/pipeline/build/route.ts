@@ -67,17 +67,19 @@ export async function POST(request: NextRequest) {
             continue
           }
 
-          let siteUrl = `/api/sites/${lead.id}`
+          const siteUrl = `/api/sites/${lead.id}`
           if (process.env.BLOB_READ_WRITE_TOKEN) {
             try {
-              const blob = await put(`sites/${lead.id}.html`, siteHtml, {
+              await put(`sites/${lead.id}.html`, siteHtml, {
                 access: 'public',
                 contentType: 'text/html',
                 addRandomSuffix: false,
               })
-              siteUrl = blob.url
+              // Do NOT use blob.url as siteUrl — Vercel Blob CDN serves HTML with
+              // Content-Disposition: attachment, causing browsers to download instead of render.
+              // Always proxy through /api/sites/[slug] which sets the correct headers.
             } catch {
-              send({ type: 'status', message: `Blob upload failed for ${lead.business}, using fallback URL` })
+              send({ type: 'status', message: `Blob upload failed for ${lead.business}, site still accessible via preview` })
             }
           }
 
