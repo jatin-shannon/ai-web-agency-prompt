@@ -108,6 +108,18 @@ export async function POST(request: NextRequest) {
           saveLead(updatedLead)
           built.push(updatedLead)
 
+          // Persist lead JSON to Blob so results survive if the browser tab was closed.
+          if (process.env.BLOB_READ_WRITE_TOKEN) {
+            try {
+              const { htmlContent: _j, ...leadForBlob } = updatedLead
+              await put(`leads/${lead.id}.json`, JSON.stringify(leadForBlob), {
+                access: 'public',
+                contentType: 'application/json',
+                addRandomSuffix: false,
+              })
+            } catch { /* non-fatal */ }
+          }
+
           const { htmlContent: _h, ...leadForStream } = updatedLead
           send({
             type: 'lead_complete',

@@ -142,11 +142,14 @@ export default function Home() {
   const buildLogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // 1. Restore from localStorage first (fast, synchronous)
+    let localLeads: Lead[] = []
     try {
       const stored = localStorage.getItem('ai-agency-leads')
       if (stored) {
         const parsed = JSON.parse(stored) as Lead[]
         if (parsed.length > 0) {
+          localLeads = parsed
           setLeads(parsed)
           const anyBuilt = parsed.some(l => l.stage === 'built')
           const anyDiscovered = parsed.some(l => l.stage === 'discovered')
@@ -158,6 +161,25 @@ export default function Home() {
         }
       }
     } catch {}
+
+    // 2. Merge in any build results persisted to Blob — covers the case where the
+    //    user closed the tab mid-build and server-side results finished after they left.
+    fetch('/api/leads/saved')
+      .then(r => r.json())
+      .then(({ leads: saved }: { leads: Lead[] }) => {
+        if (!saved?.length) return
+        setLeads(prev => {
+          const map = new Map(prev.map(l => [l.id, l]))
+          for (const sl of saved) {
+            const existing = map.get(sl.id)
+            // Only overwrite with a 'built' record — never downgrade
+            if (!existing || sl.stage === 'built') map.set(sl.id, sl)
+          }
+          return Array.from(map.values())
+        })
+        setAppStage(prev => (prev === 'idle' ? 'complete' : prev))
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -284,6 +306,8 @@ export default function Home() {
     setLocationError('')
     setShowSuggestions(false)
     localStorage.removeItem('ai-agency-leads')
+    // Clear previously saved Blob results so they don't bleed into the new session
+    fetch('/api/leads/saved', { method: 'DELETE' }).catch(() => {})
     try {
       await readStream(
         '/api/pipeline/discover',
@@ -365,6 +389,31 @@ export default function Home() {
 
   const isRunning = appStage === 'discovering' || appStage === 'building'
   const builtLeads = leads.filter(l => l.stage === 'built')
+  const unbuiltLeads = leads.filter(l => l.stage === 'discovered')
+
+  const runBuildRemaining = async () => {
+    const ids = unbuiltLeads.map(l => l.id)
+    if (ids.length === 0) return
+    setAppStage('building')
+    setBuildLog([])
+    setExpandedLead(null)
+    try {
+      await readStream(
+        '/api/pipeline/build',
+        { leadIds: ids, leads: unbuiltLeads },
+        (event) => {
+          if (event.type === 'lead_complete') {
+            setLeads(prev => prev.map(l => l.id === event.lead.id ? event.lead : l))
+          }
+        },
+        () => setAppStage('complete'),
+        (line) => setBuildLog(prev => [...prev, line]),
+      )
+    } catch (err) {
+      setBuildLog(prev => [...prev, { type: 'error', message: String(err) }])
+      setAppStage('complete')
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -529,8 +578,10 @@ export default function Home() {
                   {appStage === 'complete' ? 'Phase 3 — Lead Dashboard' : 'Phase 2 — Review & Select'}
                 </h2>
                 <p className="text-sm text-gray-400 mt-0.5">
-                  {appStage === 'complete'
+                  {appStage === 'complete' && unbuiltLeads.length === 0
                     ? 'Review and approve all scripts before contacting any business.'
+                    : appStage === 'complete' && unbuiltLeads.length > 0
+                    ? `${builtLeads.length} built · ${unbuiltLeads.length} not yet built`
                     : `${leads.length} lead${leads.length !== 1 ? 's' : ''} found. Tick the ones to build, then click Build Sites.`}
                 </p>
               </div>
@@ -556,10 +607,21 @@ export default function Home() {
                 </div>
               )}
               {appStage === 'building' && (
-                <span className="flex items-center gap-2 text-sm text-gray-400 shrink-0">
-                  <span className="w-3 h-3 rounded-full border-2 border-green-400 border-t-transparent animate-spin" />
-                  Building&hellip;
-                </span>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="flex items-center gap-2 text-sm text-gray-400">
+                    <span className="w-3 h-3 rounded-full border-2 border-green-400 border-t-transparent animate-spin" />
+                    Building&hellip;
+                  </span>
+                  <span className="text-xs text-green-700">Safe to close tab — results will be here when you return</span>
+                </div>
+              )}
+              {appStage === 'complete' && unbuiltLeads.length > 0 && (
+                <button
+                  onClick={runBuildRemaining}
+                  className="px-4 py-2 bg-yellow-700 hover:bg-yellow-600 rounded-lg font-medium text-sm transition-colors whitespace-nowrap shrink-0"
+                >
+                  Build remaining {unbuiltLeads.length}
+                </button>
               )}
             </div>
 
