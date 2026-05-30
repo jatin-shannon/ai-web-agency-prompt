@@ -77,7 +77,7 @@ export async function searchBusinesses(
   for (const category of SEARCH_CATEGORIES) {
     const body: Record<string, unknown> = {
       textQuery: `${category} in ${city}`,
-      maxResultCount: 10,
+      maxResultCount: 20,
     }
     if (locationRestriction) body.locationRestriction = locationRestriction
 

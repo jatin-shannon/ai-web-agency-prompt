@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
         const leads: Lead[] = []
 
         for (const biz of businesses) {
-          if (leads.length >= 20) break
+          if (leads.length >= 30) break
 
           const name = biz.displayName.text
 
