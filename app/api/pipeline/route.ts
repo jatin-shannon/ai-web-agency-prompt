@@ -3,6 +3,7 @@ import { searchBusinesses } from '@/lib/places'
 import { checkWebsite } from '@/lib/website-checker'
 import { generateSite } from '@/lib/site-generator'
 import { saveLead, clearLeads } from '@/lib/leads-store'
+import { currentSpendUsd, remainingBudgetUsd, monthlyBudgetUsd } from '@/lib/usage-tracker'
 import { Lead, PlaceResult } from '@/types'
 import fs from 'fs'
 import path from 'path'
@@ -33,6 +34,15 @@ export async function POST(request: NextRequest) {
       try {
         clearLeads()
         send({ type: 'status', message: `Starting pipeline for ${city}…` })
+
+        const spent = currentSpendUsd().toFixed(2)
+        const remaining = remainingBudgetUsd().toFixed(2)
+        const budget = monthlyBudgetUsd().toFixed(2)
+        send({
+          type: 'status',
+          message: `Google budget: $${spent} spent · $${remaining} remaining of $${budget}/month limit`,
+        })
+
         send({ type: 'status', message: 'Searching Google Maps for businesses…' })
 
         let businesses: PlaceResult[]

@@ -1,4 +1,5 @@
 import { PlaceResult } from '@/types'
+import { assertBudget, recordSearches } from '@/lib/usage-tracker'
 
 const FIELD_MASK = [
   'places.id',
@@ -27,6 +28,9 @@ const SEARCH_CATEGORIES = [
 export async function searchBusinesses(city: string): Promise<PlaceResult[]> {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY
   if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY is not configured')
+
+  // Throws if this run would push monthly Google spend over budget
+  assertBudget(SEARCH_CATEGORIES.length)
 
   const results: PlaceResult[] = []
   const seen = new Set<string>()
@@ -58,6 +62,8 @@ export async function searchBusinesses(city: string): Promise<PlaceResult[]> {
         results.push(place as PlaceResult)
       }
     }
+
+    recordSearches(1)
 
     // Respect rate limits
     await new Promise(r => setTimeout(r, 300))
