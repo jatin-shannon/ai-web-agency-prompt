@@ -158,6 +158,7 @@ export default function Home() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [locationError, setLocationError] = useState('')
+  const [logCopied, setLogCopied] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputWrapRef = useRef<HTMLDivElement>(null)
 
@@ -315,6 +316,15 @@ export default function Home() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: leadId, commId, ...patch }),
     })
+  }
+
+  const copyLog = async () => {
+    const text = log.map(e => `${logPrefix(e.type)} ${e.message}`).join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      setLogCopied(true)
+      setTimeout(() => setLogCopied(false), 2000)
+    } catch {}
   }
 
   const logColor = (type: LogLine['type']) => {
@@ -490,6 +500,12 @@ export default function Home() {
             <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
               <span className="text-sm font-medium text-gray-300">Pipeline Log</span>
+              <button
+                onClick={copyLog}
+                className="ml-auto text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+              >
+                {logCopied ? '✓ Copied' : 'Copy'}
+              </button>
             </div>
             <div ref={logRef} className="p-4 h-52 overflow-y-auto font-mono text-xs space-y-1">
               {log.map((entry, i) => (
