@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
           message: `Google budget: $${spent} spent · $${remaining} remaining of $${budget}/month limit`,
         })
 
-        send({ type: 'status', message: 'Searching 6 business categories on Google Maps…' })
+        send({ type: 'status', message: 'Searching 14 business categories on Google Maps…' })
 
         let businesses: PlaceResult[]
         try {

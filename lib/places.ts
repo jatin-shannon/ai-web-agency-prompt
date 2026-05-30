@@ -17,12 +17,20 @@ const FIELD_MASK = [
 ].join(',')
 
 const SEARCH_CATEGORIES = [
-  'independent restaurant',
+  'independent restaurant OR cafe OR bakery',
   'barbershop OR nail salon OR beauty salon',
   'auto repair shop OR mechanic shop',
   'plumber OR electrician OR handyman',
-  'pet groomer OR dog daycare',
-  'florist OR boutique',
+  'pet groomer OR dog daycare OR veterinarian',
+  'florist OR boutique OR gift shop',
+  'house cleaning service OR maid service OR janitorial',
+  'landscaping OR lawn care OR gardening service',
+  'painting contractor OR house painter',
+  'massage therapist OR day spa OR wellness center',
+  'personal trainer OR yoga studio OR fitness studio',
+  'photographer OR photography studio',
+  'moving company OR moving service',
+  'catering service OR food truck',
 ]
 
 async function getPlaceCoords(
