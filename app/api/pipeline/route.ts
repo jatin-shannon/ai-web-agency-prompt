@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { put } from '@vercel/blob'
 import { searchBusinesses } from '@/lib/places'
 import { checkWebsite } from '@/lib/website-checker'
 import { generateSite } from '@/lib/site-generator'
@@ -6,8 +7,6 @@ import { generateCommunications } from '@/lib/comms-generator'
 import { saveLead, clearLeads } from '@/lib/leads-store'
 import { currentSpendUsd, remainingBudgetUsd, monthlyBudgetUsd } from '@/lib/usage-tracker'
 import { Lead, PlaceResult } from '@/types'
-import fs from 'fs'
-import path from 'path'
 
 function getBestCallTime(hours?: PlaceResult['regularOpeningHours']): string {
   if (!hours?.weekdayDescriptions?.length) return 'Business hours'
@@ -105,28 +104,34 @@ export async function POST(request: NextRequest) {
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '')
 
-          const sitesDir = path.join(process.cwd(), 'public', 'sites')
-          fs.mkdirSync(sitesDir, { recursive: true })
-          fs.writeFileSync(path.join(sitesDir, `${slug}.html`), siteHtml)
+          // Upload HTML to Vercel Blob for a stable, globally-accessible URL.
+          // Falls back to the /api/sites route when BLOB_READ_WRITE_TOKEN is not set.
+          let siteUrl = `/api/sites/${slug}`
+          if (process.env.BLOB_READ_WRITE_TOKEN) {
+            try {
+              const blob = await put(`sites/${slug}.html`, siteHtml, {
+                access: 'public',
+                contentType: 'text/html',
+                addRandomSuffix: false,
+              })
+              siteUrl = blob.url
+            } catch (err) {
+              send({ type: 'status', message: `Blob upload failed for ${name}, using fallback URL` })
+            }
+          }
 
           send({ type: 'status', message: `Writing call scripts for ${name}…` })
           let communications: Lead['communications'] = []
           try {
-            const partialLead = {
-              id: slug,
+            communications = await generateCommunications({
               business: name,
               type: biz.primaryTypeDisplayName?.text ?? 'Local Business',
               phone: biz.nationalPhoneNumber!,
               address: biz.formattedAddress,
               rating: biz.rating ?? 0,
               reviews: biz.userRatingCount ?? 0,
-              siteUrl: `/sites/${slug}.html`,
-              bestCallTime: getBestCallTime(biz.regularOpeningHours),
-              hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
-              status: '🔴 Not Contacted',
-              communications: [],
-            }
-            communications = await generateCommunications(partialLead)
+              siteUrl,
+            })
           } catch (err) {
             send({ type: 'error', message: `Comms generation failed for ${name}: ${String(err)}` })
           }
@@ -139,23 +144,26 @@ export async function POST(request: NextRequest) {
             address: biz.formattedAddress,
             rating: biz.rating ?? 0,
             reviews: biz.userRatingCount ?? 0,
-            siteUrl: `/sites/${slug}.html`,
+            siteUrl,
             bestCallTime: getBestCallTime(biz.regularOpeningHours),
             hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
             status: '🔴 Not Contacted',
             communications,
+            // Only store htmlContent when Blob is not available (fallback path)
+            htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
           }
 
           saveLead(lead)
           leads.push(lead)
 
-          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead })
+          const { htmlContent: _h, ...leadForStream } = lead
+          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead: leadForStream })
         }
 
         send({
           type: 'done',
           message: `Pipeline complete — ${leads.length} lead${leads.length !== 1 ? 's' : ''} generated`,
-          leads,
+          leads: leads.map(({ htmlContent: _h, ...l }) => l),
         })
       } catch (err) {
         send({ type: 'error', message: `Unexpected error: ${String(err)}` })

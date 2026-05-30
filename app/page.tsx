@@ -150,12 +150,20 @@ export default function Home() {
   const [expandedLead, setExpandedLead] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
+  // Restore leads from localStorage on mount (survives page reloads)
   useEffect(() => {
-    fetch('/api/leads')
-      .then(r => r.json())
-      .then((data: Lead[]) => setLeads(data))
-      .catch(() => {})
+    try {
+      const stored = localStorage.getItem('ai-agency-leads')
+      if (stored) setLeads(JSON.parse(stored))
+    } catch {}
   }, [])
+
+  // Persist leads to localStorage whenever they change
+  useEffect(() => {
+    if (leads.length > 0) {
+      localStorage.setItem('ai-agency-leads', JSON.stringify(leads))
+    }
+  }, [leads])
 
   useEffect(() => {
     if (logRef.current) {
@@ -169,6 +177,7 @@ export default function Home() {
     setLog([])
     setLeads([])
     setExpandedLead(null)
+    localStorage.removeItem('ai-agency-leads')
 
     try {
       const response = await fetch('/api/pipeline', {

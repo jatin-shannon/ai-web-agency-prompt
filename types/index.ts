@@ -19,6 +19,7 @@ export interface Lead {
   hook: string
   status: string
   communications: Communication[]
+  htmlContent?: string
 }
 
 export interface PlaceResult {
