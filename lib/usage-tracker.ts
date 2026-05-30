@@ -1,7 +1,6 @@
 import fs from 'fs'
-import path from 'path'
 
-const USAGE_FILE = path.join(process.cwd(), 'data', 'usage.json')
+const USAGE_FILE = '/tmp/usage.json'
 const COST_PER_SEARCH = 0.032
 
 interface UsageRecord {
@@ -25,7 +24,6 @@ function loadUsage(): UsageRecord {
 }
 
 function saveUsage(record: UsageRecord): void {
-  fs.mkdirSync(path.dirname(USAGE_FILE), { recursive: true })
   fs.writeFileSync(USAGE_FILE, JSON.stringify(record, null, 2))
 }
 

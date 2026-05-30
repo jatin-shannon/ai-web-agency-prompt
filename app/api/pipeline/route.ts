@@ -6,8 +6,6 @@ import { generateCommunications } from '@/lib/comms-generator'
 import { saveLead, clearLeads } from '@/lib/leads-store'
 import { currentSpendUsd, remainingBudgetUsd, monthlyBudgetUsd } from '@/lib/usage-tracker'
 import { Lead, PlaceResult } from '@/types'
-import fs from 'fs'
-import path from 'path'
 
 function getBestCallTime(hours?: PlaceResult['regularOpeningHours']): string {
   if (!hours?.weekdayDescriptions?.length) return 'Business hours'
@@ -105,10 +103,6 @@ export async function POST(request: NextRequest) {
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '')
 
-          const sitesDir = path.join(process.cwd(), 'public', 'sites')
-          fs.mkdirSync(sitesDir, { recursive: true })
-          fs.writeFileSync(path.join(sitesDir, `${slug}.html`), siteHtml)
-
           send({ type: 'status', message: `Writing call scripts for ${name}…` })
           let communications: Lead['communications'] = []
           try {
@@ -120,7 +114,7 @@ export async function POST(request: NextRequest) {
               address: biz.formattedAddress,
               rating: biz.rating ?? 0,
               reviews: biz.userRatingCount ?? 0,
-              siteUrl: `/sites/${slug}.html`,
+              siteUrl: `/api/sites/${slug}`,
               bestCallTime: getBestCallTime(biz.regularOpeningHours),
               hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
               status: '🔴 Not Contacted',
@@ -139,23 +133,26 @@ export async function POST(request: NextRequest) {
             address: biz.formattedAddress,
             rating: biz.rating ?? 0,
             reviews: biz.userRatingCount ?? 0,
-            siteUrl: `/sites/${slug}.html`,
+            siteUrl: `/api/sites/${slug}`,
             bestCallTime: getBestCallTime(biz.regularOpeningHours),
             hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
             status: '🔴 Not Contacted',
             communications,
+            htmlContent: siteHtml,
           }
 
           saveLead(lead)
           leads.push(lead)
 
-          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead })
+          // Don't send htmlContent over SSE — too large
+          const { htmlContent: _, ...leadWithoutHtml } = lead
+          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead: leadWithoutHtml })
         }
 
         send({
           type: 'done',
           message: `Pipeline complete — ${leads.length} lead${leads.length !== 1 ? 's' : ''} generated`,
-          leads,
+          leads: leads.map(({ htmlContent: _, ...l }) => l),
         })
       } catch (err) {
         send({ type: 'error', message: `Unexpected error: ${String(err)}` })

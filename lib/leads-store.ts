@@ -1,8 +1,8 @@
 import fs from 'fs'
-import path from 'path'
 import { Lead } from '@/types'
 
-const LEADS_FILE = path.join(process.cwd(), 'data', 'leads.json')
+// /tmp is the only writable directory in Vercel serverless functions
+const LEADS_FILE = '/tmp/leads.json'
 
 export function getLeads(): Lead[] {
   try {
@@ -14,12 +14,11 @@ export function getLeads(): Lead[] {
 }
 
 export function saveLead(lead: Lead): void {
-  fs.mkdirSync(path.dirname(LEADS_FILE), { recursive: true })
   const leads = getLeads()
   const idx = leads.findIndex(l => l.id === lead.id)
   if (idx >= 0) leads[idx] = lead
   else leads.push(lead)
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2))
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
 }
 
 export function updateLeadStatus(id: string, status: string): void {
@@ -27,7 +26,7 @@ export function updateLeadStatus(id: string, status: string): void {
   const lead = leads.find(l => l.id === id)
   if (!lead) return
   lead.status = status
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2))
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
 }
 
 export function updateCommunication(
@@ -43,19 +42,9 @@ export function updateCommunication(
   if (patch.content !== undefined) comm.content = patch.content
   if (patch.approved !== undefined) comm.approved = patch.approved
   if (patch.sent !== undefined) comm.sent = patch.sent
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2))
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
 }
 
 export function clearLeads(): void {
-  fs.mkdirSync(path.dirname(LEADS_FILE), { recursive: true })
   fs.writeFileSync(LEADS_FILE, '[]')
-
-  const sitesDir = path.join(process.cwd(), 'public', 'sites')
-  if (fs.existsSync(sitesDir)) {
-    for (const f of fs.readdirSync(sitesDir)) {
-      if (f.endsWith('.html')) {
-        fs.unlinkSync(path.join(sitesDir, f))
-      }
-    }
-  }
 }
