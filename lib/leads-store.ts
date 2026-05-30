@@ -1,6 +1,7 @@
 import fs from 'fs'
 import { Lead } from '@/types'
 
+// /tmp is the only writable directory in Vercel serverless functions
 const LEADS_FILE = '/tmp/leads.json'
 
 export function getLeads(): Lead[] {

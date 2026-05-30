@@ -18,6 +18,9 @@ function getBestCallTime(hours?: PlaceResult['regularOpeningHours']): string {
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const city: string = (body.city ?? '').trim()
+  const placeId: string = (body.placeId ?? '').trim()
+  const searchMode: string = body.searchMode ?? 'area'
+  const radiusKm: number = Math.max(1, Math.min(50, Number(body.radiusKm) || 5))
 
   if (!city) {
     return new Response('City is required', { status: 400 })
@@ -33,7 +36,10 @@ export async function POST(request: NextRequest) {
 
       try {
         clearLeads()
-        send({ type: 'status', message: `Starting pipeline for ${city}…` })
+
+        const modeDesc =
+          searchMode === 'radius' && placeId ? `within ${radiusKm} km of ${city}` : city
+        send({ type: 'status', message: `Starting pipeline for ${modeDesc}…` })
 
         const spent = currentSpendUsd().toFixed(2)
         const remaining = remainingBudgetUsd().toFixed(2)
@@ -47,7 +53,10 @@ export async function POST(request: NextRequest) {
 
         let businesses: PlaceResult[]
         try {
-          businesses = await searchBusinesses(city)
+          businesses = await searchBusinesses(
+            city,
+            searchMode === 'radius' && placeId ? { placeId, radiusKm } : undefined,
+          )
         } catch (err) {
           send({ type: 'error', message: `Google Places API error: ${String(err)}` })
           controller.close()
@@ -83,6 +92,7 @@ export async function POST(request: NextRequest) {
               send({ type: 'skip', message: `Skipping ${name} — has a working website` })
               continue
             }
+            // Facebook / Yelp / Instagram pages are treated as no real website — business qualifies
           }
 
           send({

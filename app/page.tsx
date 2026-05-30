@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Lead, Communication, PipelineEvent } from '@/types'
 
 const STATUS_OPTIONS = [
@@ -12,6 +12,7 @@ const STATUS_OPTIONS = [
 ]
 
 type LogLine = { type: PipelineEvent['type']; message: string }
+type Suggestion = { label: string; placeId: string }
 
 function approvedCount(comms: Communication[]): number {
   return comms.filter(c => c.approved).length
@@ -56,7 +57,7 @@ function CommPanel({
     <div className="px-6 py-5 space-y-4">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-gray-200">
-          Outreach Scripts — {lead.business}
+          Outreach Scripts &mdash; {lead.business}
         </h3>
         <span className="text-xs text-gray-500">
           {approvedCount(lead.communications)}/{lead.communications.length} approved
@@ -85,7 +86,7 @@ function CommPanel({
                     <span className="text-xs text-blue-400 font-medium">Sent</span>
                   )}
                   {comm.approved && (
-                    <span className="text-xs text-green-400 font-medium">✓ Approved</span>
+                    <span className="text-xs text-green-400 font-medium">&#10003; Approved</span>
                   )}
                 </div>
               </div>
@@ -113,7 +114,7 @@ function CommPanel({
                       : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                   }`}
                 >
-                  {comm.approved ? '✓ Approved' : 'Approve'}
+                  {comm.approved ? '&#10003; Approved' : 'Approve'}
                 </button>
                 {comm.approved && (
                   <button
@@ -124,7 +125,7 @@ function CommPanel({
                         : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
                     }`}
                   >
-                    {comm.sent ? 'Sent ✓' : 'Mark Sent'}
+                    {comm.sent ? 'Sent &#10003;' : 'Mark Sent'}
                   </button>
                 )}
               </div>
@@ -150,6 +151,17 @@ export default function Home() {
   const [expandedLead, setExpandedLead] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
+  // Search mode + radius
+  const [searchMode, setSearchMode] = useState<'area' | 'radius'>('area')
+  const [radiusKm, setRadiusKm] = useState(5)
+  const [selectedPlaceId, setSelectedPlaceId] = useState('')
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [locationError, setLocationError] = useState('')
+  const [logCopied, setLogCopied] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputWrapRef = useRef<HTMLDivElement>(null)
+
   // Restore leads from localStorage on mount (survives page reloads)
   useEffect(() => {
     try {
@@ -171,19 +183,72 @@ export default function Home() {
     }
   }, [log])
 
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (inputWrapRef.current && !inputWrapRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const fetchSuggestions = useCallback(async (value: string) => {
+    if (value.length < 2) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+    try {
+      const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(value)}`)
+      const data = await res.json()
+      const s: Suggestion[] = data.suggestions ?? []
+      setSuggestions(s)
+      setShowSuggestions(s.length > 0)
+    } catch {}
+  }, [])
+
+  const handleCityChange = (value: string) => {
+    setCity(value)
+    setSelectedPlaceId('')
+    setLocationError('')
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => fetchSuggestions(value), 300)
+  }
+
+  const selectSuggestion = (s: Suggestion) => {
+    setCity(s.label)
+    setSelectedPlaceId(s.placeId)
+    setSuggestions([])
+    setShowSuggestions(false)
+  }
+
   const runPipeline = async () => {
     if (!city.trim() || running) return
+    if (city.trim().length < 3) {
+      setLocationError('Please enter a city, suburb or neighbourhood')
+      return
+    }
+
     setRunning(true)
     setLog([])
     setLeads([])
     setExpandedLead(null)
+    setLocationError('')
+    setShowSuggestions(false)
     localStorage.removeItem('ai-agency-leads')
 
     try {
       const response = await fetch('/api/pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ city: city.trim() }),
+        body: JSON.stringify({
+          city: city.trim(),
+          searchMode,
+          radiusKm,
+          placeId: selectedPlaceId || undefined,
+        }),
       })
 
       if (!response.body) throw new Error('No response body')
@@ -253,6 +318,15 @@ export default function Home() {
     })
   }
 
+  const copyLog = async () => {
+    const text = log.map(e => `${logPrefix(e.type)} ${e.message}`).join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      setLogCopied(true)
+      setTimeout(() => setLogCopied(false), 2000)
+    } catch {}
+  }
+
   const logColor = (type: LogLine['type']) => {
     switch (type) {
       case 'error': return 'text-red-400'
@@ -282,7 +356,7 @@ export default function Home() {
           <div>
             <h1 className="text-xl font-bold tracking-tight">AI Web Agency</h1>
             <p className="text-sm text-gray-400 mt-0.5">
-              Find businesses → Build sites → Get paid
+              Find businesses &rarr; Build sites &rarr; Get paid
             </p>
           </div>
           {leads.length > 0 && (
@@ -298,34 +372,126 @@ export default function Home() {
         <section className="bg-gray-900 rounded-xl p-6 border border-gray-800">
           <h2 className="text-base font-semibold mb-1">Run Pipeline</h2>
           <p className="text-sm text-gray-400 mb-4">
-            Enter a city or neighborhood. The pipeline finds qualified leads, builds a website
-            for each one, writes personalized call scripts, and populates the dashboard.
+            Enter a city, suburb or neighbourhood. The pipeline finds qualified leads, builds a
+            website for each one, writes personalized call scripts, and populates the dashboard.
           </p>
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={city}
-              onChange={e => setCity(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && runPipeline()}
-              placeholder="e.g. Santa Monica, CA"
+
+          {/* Search mode toggle */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs text-gray-500 mr-1">Search by</span>
+            <button
+              onClick={() => setSearchMode('area')}
               disabled={running}
-              className="flex-1 bg-gray-800 rounded-lg px-4 py-3 placeholder-gray-500 border border-gray-700 focus:outline-none focus:border-blue-500 disabled:opacity-50 text-sm"
-            />
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-50 ${
+                searchMode === 'area'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              Area name
+            </button>
+            <button
+              onClick={() => setSearchMode('radius')}
+              disabled={running}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors disabled:opacity-50 ${
+                searchMode === 'radius'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              Radius
+            </button>
+          </div>
+
+          {/* Radius slider — shown only in radius mode */}
+          {searchMode === 'radius' && (
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-xs text-gray-500 w-14 shrink-0">Radius</span>
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={radiusKm}
+                onChange={e => setRadiusKm(Number(e.target.value))}
+                disabled={running}
+                className="flex-1 accent-blue-500 disabled:opacity-50"
+              />
+              <span className="text-xs text-gray-300 w-16 text-right shrink-0">
+                {radiusKm} km
+              </span>
+            </div>
+          )}
+
+          {/* Location input with autocomplete + run button */}
+          <div className="flex gap-3">
+            <div ref={inputWrapRef} className="flex-1 relative">
+              <input
+                type="text"
+                value={city}
+                onChange={e => handleCityChange(e.target.value)}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { setShowSuggestions(false); runPipeline() }
+                  if (e.key === 'Escape') setShowSuggestions(false)
+                }}
+                placeholder={
+                  searchMode === 'radius'
+                    ? 'e.g. Santa Monica — pick from dropdown to pin radius'
+                    : 'e.g. Santa Monica, CA'
+                }
+                disabled={running}
+                className={`w-full bg-gray-800 rounded-lg px-4 py-3 placeholder-gray-500 border focus:outline-none disabled:opacity-50 text-sm transition-colors ${
+                  locationError
+                    ? 'border-red-500 focus:border-red-400'
+                    : 'border-gray-700 focus:border-blue-500'
+                }`}
+              />
+
+              {/* Autocomplete suggestions dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-20 overflow-hidden">
+                  {suggestions.map(s => (
+                    <button
+                      key={s.placeId}
+                      onMouseDown={() => selectSuggestion(s)}
+                      className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-0"
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <button
               onClick={runPipeline}
               disabled={running || !city.trim()}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium text-sm transition-colors"
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium text-sm transition-colors whitespace-nowrap"
             >
               {running ? (
                 <span className="flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full border-2 border-blue-300 border-t-transparent animate-spin" />
-                  Running…
+                  Running&hellip;
                 </span>
               ) : (
                 'Run Pipeline'
               )}
             </button>
           </div>
+
+          {locationError && (
+            <p className="mt-2 text-xs text-red-400">{locationError}</p>
+          )}
+          {searchMode === 'radius' && !selectedPlaceId && city.length > 1 && !locationError && (
+            <p className="mt-2 text-xs text-yellow-600">
+              Select a suggestion from the list to lock the radius to an exact point.
+            </p>
+          )}
+          {searchMode === 'radius' && selectedPlaceId && (
+            <p className="mt-2 text-xs text-green-600">
+              Location pinned &mdash; will search within {radiusKm} km of {city}.
+            </p>
+          )}
         </section>
 
         {/* Pipeline log */}
@@ -334,6 +500,12 @@ export default function Home() {
             <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
               <span className="text-sm font-medium text-gray-300">Pipeline Log</span>
+              <button
+                onClick={copyLog}
+                className="ml-auto text-xs text-gray-500 hover:text-gray-300 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+              >
+                {logCopied ? '✓ Copied' : 'Copy'}
+              </button>
             </div>
             <div ref={logRef} className="p-4 h-52 overflow-y-auto font-mono text-xs space-y-1">
               {log.map((entry, i) => (
@@ -399,7 +571,7 @@ export default function Home() {
                             </a>
                           </td>
                           <td className="px-4 py-4 text-sm whitespace-nowrap">
-                            <span className="text-yellow-400">★</span>{' '}
+                            <span className="text-yellow-400">&#9733;</span>{' '}
                             <span>{lead.rating}</span>
                             <span className="text-gray-500 text-xs ml-1">({lead.reviews})</span>
                           </td>
@@ -410,7 +582,7 @@ export default function Home() {
                               rel="noopener noreferrer"
                               className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap"
                             >
-                              View Site →
+                              View Site &rarr;
                             </a>
                           </td>
                           <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">
