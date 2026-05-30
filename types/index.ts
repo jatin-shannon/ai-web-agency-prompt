@@ -1,3 +1,11 @@
+export interface Communication {
+  id: 'cold-call' | 'text-day0' | 'text-day2' | 'text-day5' | 'text-day10'
+  label: string
+  content: string
+  approved: boolean
+  sent: boolean
+}
+
 export interface Lead {
   id: string
   business: string
@@ -10,6 +18,7 @@ export interface Lead {
   bestCallTime: string
   hook: string
   status: string
+  communications: Communication[]
 }
 
 export interface PlaceResult {

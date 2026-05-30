@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Lead, PipelineEvent } from '@/types'
+import { Lead, Communication, PipelineEvent } from '@/types'
 
 const STATUS_OPTIONS = [
   '🔴 Not Contacted',
@@ -13,14 +13,143 @@ const STATUS_OPTIONS = [
 
 type LogLine = { type: PipelineEvent['type']; message: string }
 
+function approvedCount(comms: Communication[]): number {
+  return comms.filter(c => c.approved).length
+}
+
+function CommPanel({
+  lead,
+  onUpdate,
+}: {
+  lead: Lead
+  onUpdate: (leadId: string, commId: string, patch: Partial<Communication>) => void
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries((lead.communications ?? []).map(c => [c.id, c.content]))
+  )
+
+  const isSms = (id: Communication['id']) => id !== 'cold-call'
+
+  const save = (comm: Communication) => {
+    const content = drafts[comm.id] ?? comm.content
+    onUpdate(lead.id, comm.id, { content })
+  }
+
+  const toggleApprove = (comm: Communication) => {
+    const content = drafts[comm.id] ?? comm.content
+    onUpdate(lead.id, comm.id, { content, approved: !comm.approved })
+  }
+
+  const toggleSent = (comm: Communication) => {
+    onUpdate(lead.id, comm.id, { sent: !comm.sent })
+  }
+
+  if (!lead.communications?.length) {
+    return (
+      <div className="px-6 py-4 text-sm text-gray-500 italic">
+        No communications generated for this lead.
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-6 py-5 space-y-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-gray-200">
+          Outreach Scripts — {lead.business}
+        </h3>
+        <span className="text-xs text-gray-500">
+          {approvedCount(lead.communications)}/{lead.communications.length} approved
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+        {lead.communications.map(comm => {
+          const draft = drafts[comm.id] ?? comm.content
+          const charCount = draft.length
+          const overLimit = isSms(comm.id) && charCount > 160
+
+          return (
+            <div
+              key={comm.id}
+              className={`rounded-lg border p-4 flex flex-col gap-3 ${
+                comm.approved
+                  ? 'border-green-700 bg-green-950/30'
+                  : 'border-gray-700 bg-gray-800/50'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-300">{comm.label}</span>
+                <div className="flex items-center gap-2">
+                  {comm.sent && (
+                    <span className="text-xs text-blue-400 font-medium">Sent</span>
+                  )}
+                  {comm.approved && (
+                    <span className="text-xs text-green-400 font-medium">✓ Approved</span>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                value={draft}
+                onChange={e => setDrafts(prev => ({ ...prev, [comm.id]: e.target.value }))}
+                onBlur={() => save(comm)}
+                rows={comm.id === 'cold-call' ? 6 : 4}
+                className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 resize-none focus:outline-none focus:border-blue-500"
+              />
+
+              {isSms(comm.id) && (
+                <div className={`text-xs ${overLimit ? 'text-red-400' : 'text-gray-500'}`}>
+                  {charCount}/160 chars{overLimit ? ' — over SMS limit' : ''}
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-auto">
+                <button
+                  onClick={() => toggleApprove(comm)}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    comm.approved
+                      ? 'bg-green-700 hover:bg-green-600 text-white'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                  }`}
+                >
+                  {comm.approved ? '✓ Approved' : 'Approve'}
+                </button>
+                {comm.approved && (
+                  <button
+                    onClick={() => toggleSent(comm)}
+                    className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      comm.sent
+                        ? 'bg-blue-700 hover:bg-blue-600 text-white'
+                        : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                    }`}
+                  >
+                    {comm.sent ? 'Sent ✓' : 'Mark Sent'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {approvedCount(lead.communications) < lead.communications.length && (
+        <p className="text-xs text-yellow-600">
+          Review and approve each script before contacting this business.
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function Home() {
   const [city, setCity] = useState('')
   const [running, setRunning] = useState(false)
   const [log, setLog] = useState<LogLine[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
+  const [expandedLead, setExpandedLead] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
 
-  // Load persisted leads on mount
   useEffect(() => {
     fetch('/api/leads')
       .then(r => r.json())
@@ -28,7 +157,6 @@ export default function Home() {
       .catch(() => {})
   }, [])
 
-  // Auto-scroll log
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight
@@ -40,6 +168,7 @@ export default function Home() {
     setRunning(true)
     setLog([])
     setLeads([])
+    setExpandedLead(null)
 
     try {
       const response = await fetch('/api/pipeline', {
@@ -91,6 +220,30 @@ export default function Home() {
     })
   }
 
+  const updateComm = async (
+    leadId: string,
+    commId: string,
+    patch: Partial<Communication>,
+  ) => {
+    setLeads(prev =>
+      prev.map(l =>
+        l.id !== leadId
+          ? l
+          : {
+              ...l,
+              communications: l.communications.map(c =>
+                c.id === commId ? { ...c, ...patch } : c,
+              ),
+            },
+      ),
+    )
+    await fetch('/api/leads', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: leadId, commId, ...patch }),
+    })
+  }
+
   const logColor = (type: LogLine['type']) => {
     switch (type) {
       case 'error': return 'text-red-400'
@@ -115,7 +268,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      {/* Header */}
       <header className="border-b border-gray-800 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
@@ -137,8 +289,8 @@ export default function Home() {
         <section className="bg-gray-900 rounded-xl p-6 border border-gray-800">
           <h2 className="text-base font-semibold mb-1">Run Pipeline</h2>
           <p className="text-sm text-gray-400 mb-4">
-            Enter a city or neighborhood. The pipeline will find qualified leads, build a website
-            for each one, and populate the dashboard below.
+            Enter a city or neighborhood. The pipeline finds qualified leads, builds a website
+            for each one, writes personalized call scripts, and populates the dashboard.
           </p>
           <div className="flex gap-3">
             <input
@@ -171,17 +323,10 @@ export default function Home() {
         {log.length > 0 && (
           <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-800 flex items-center gap-2">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  running ? 'bg-green-400 animate-pulse' : 'bg-gray-500'
-                }`}
-              />
+              <div className={`w-2 h-2 rounded-full ${running ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
               <span className="text-sm font-medium text-gray-300">Pipeline Log</span>
             </div>
-            <div
-              ref={logRef}
-              className="p-4 h-52 overflow-y-auto font-mono text-xs space-y-1"
-            >
+            <div ref={logRef} className="p-4 h-52 overflow-y-auto font-mono text-xs space-y-1">
               {log.map((entry, i) => (
                 <div key={i} className={logColor(entry.type)}>
                   {logPrefix(entry.type)} {entry.message}
@@ -196,7 +341,10 @@ export default function Home() {
           <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-800">
               <h2 className="text-base font-semibold">Lead Dashboard</h2>
-              <p className="text-sm text-gray-400 mt-0.5">{leads.length} qualified leads — track status after each call</p>
+              <p className="text-sm text-gray-400 mt-0.5">
+                Review and approve all scripts before contacting any business.
+                Click <strong className="text-gray-300">Scripts</strong> on any row to edit.
+              </p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -209,61 +357,94 @@ export default function Home() {
                     <th className="px-4 py-3 font-medium">Rating</th>
                     <th className="px-4 py-3 font-medium">Site</th>
                     <th className="px-4 py-3 font-medium">Best Call Time</th>
+                    <th className="px-4 py-3 font-medium">Scripts</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {leads.map((lead, i) => (
-                    <tr
-                      key={lead.id}
-                      className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
-                    >
-                      <td className="px-4 py-4 text-gray-500 text-xs">{i + 1}</td>
-                      <td className="px-4 py-4">
-                        <div className="font-medium text-sm">{lead.business}</div>
-                        <div className="text-gray-500 text-xs mt-0.5">{lead.address}</div>
-                        <div className="text-gray-600 text-xs mt-0.5 italic">{lead.hook}</div>
-                      </td>
-                      <td className="px-4 py-4 text-gray-400 text-xs">{lead.type}</td>
-                      <td className="px-4 py-4">
-                        <a
-                          href={`tel:${lead.phone.replace(/\D/g, '')}`}
-                          className="text-blue-400 hover:text-blue-300 text-sm"
+                  {leads.map((lead, i) => {
+                    const isExpanded = expandedLead === lead.id
+                    const comms = lead.communications ?? []
+                    const approved = approvedCount(comms)
+                    const allApproved = comms.length > 0 && approved === comms.length
+
+                    return (
+                      <>
+                        <tr
+                          key={lead.id}
+                          className="border-b border-gray-800/50 hover:bg-gray-800/20 transition-colors"
                         >
-                          {lead.phone}
-                        </a>
-                      </td>
-                      <td className="px-4 py-4 text-sm">
-                        <span className="text-yellow-400">★</span>{' '}
-                        <span>{lead.rating}</span>
-                        <span className="text-gray-500 text-xs ml-1">({lead.reviews})</span>
-                      </td>
-                      <td className="px-4 py-4">
-                        <a
-                          href={lead.siteUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 hover:text-blue-300 underline text-sm"
-                        >
-                          View Site →
-                        </a>
-                      </td>
-                      <td className="px-4 py-4 text-gray-400 text-xs">{lead.bestCallTime}</td>
-                      <td className="px-4 py-4">
-                        <select
-                          value={lead.status}
-                          onChange={e => updateStatus(lead.id, e.target.value)}
-                          className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
-                        >
-                          {STATUS_OPTIONS.map(s => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-4 py-4 text-gray-500 text-xs">{i + 1}</td>
+                          <td className="px-4 py-4">
+                            <div className="font-medium text-sm">{lead.business}</div>
+                            <div className="text-gray-500 text-xs mt-0.5">{lead.address}</div>
+                            <div className="text-gray-600 text-xs mt-0.5 italic">{lead.hook}</div>
+                          </td>
+                          <td className="px-4 py-4 text-gray-400 text-xs">{lead.type}</td>
+                          <td className="px-4 py-4">
+                            <a
+                              href={`tel:${lead.phone.replace(/\D/g, '')}`}
+                              className="text-blue-400 hover:text-blue-300 text-sm"
+                            >
+                              {lead.phone}
+                            </a>
+                          </td>
+                          <td className="px-4 py-4 text-sm whitespace-nowrap">
+                            <span className="text-yellow-400">★</span>{' '}
+                            <span>{lead.rating}</span>
+                            <span className="text-gray-500 text-xs ml-1">({lead.reviews})</span>
+                          </td>
+                          <td className="px-4 py-4">
+                            <a
+                              href={lead.siteUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap"
+                            >
+                              View Site →
+                            </a>
+                          </td>
+                          <td className="px-4 py-4 text-gray-400 text-xs whitespace-nowrap">
+                            {lead.bestCallTime}
+                          </td>
+                          <td className="px-4 py-4">
+                            <button
+                              onClick={() => setExpandedLead(isExpanded ? null : lead.id)}
+                              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                                allApproved
+                                  ? 'bg-green-800/50 text-green-300 border border-green-700'
+                                  : isExpanded
+                                  ? 'bg-blue-700 text-white'
+                                  : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                              }`}
+                            >
+                              {allApproved ? '✓ All Approved' : `Scripts ${approved}/${comms.length}`}
+                            </button>
+                          </td>
+                          <td className="px-4 py-4">
+                            <select
+                              value={lead.status}
+                              onChange={e => updateStatus(lead.id, e.target.value)}
+                              className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+                            >
+                              {STATUS_OPTIONS.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+
+                        {/* Expandable communications panel */}
+                        {isExpanded && (
+                          <tr key={`${lead.id}-comms`} className="border-b border-gray-700 bg-gray-900/60">
+                            <td colSpan={9} className="p-0">
+                              <CommPanel lead={lead} onUpdate={updateComm} />
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -276,14 +457,15 @@ export default function Home() {
             <p className="text-lg font-medium">Enter a city above to start the pipeline</p>
             <p className="text-sm mt-2 max-w-md mx-auto">
               The pipeline searches Google Maps, filters for businesses without websites,
-              builds a premium site for each one, then populates this dashboard with contact
-              info and a cold-call script.
+              builds a premium site for each one, writes personalized scripts, then populates
+              this dashboard. You review and approve everything before any outreach.
             </p>
-            <div className="mt-8 grid grid-cols-3 gap-4 max-w-lg mx-auto text-left">
+            <div className="mt-8 grid grid-cols-4 gap-4 max-w-2xl mx-auto text-left">
               {[
                 { n: '1', label: 'Prospect Discovery', desc: 'Google Maps → filter no-website businesses' },
                 { n: '2', label: 'Site Generation', desc: 'Claude builds a $5K-quality site per lead' },
-                { n: '3', label: 'Lead Dashboard', desc: 'Phone, rating, site link, call time + status tracker' },
+                { n: '3', label: 'Script Writing', desc: 'Personalized call script + 4 follow-up texts' },
+                { n: '4', label: 'You Approve', desc: 'Review, edit, authorize — then contact' },
               ].map(step => (
                 <div key={step.n} className="bg-gray-900 rounded-lg p-4 border border-gray-800">
                   <div className="text-blue-500 text-xs font-bold mb-1">Phase {step.n}</div>
@@ -293,37 +475,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-        )}
-
-        {/* Cold call script reference */}
-        {leads.length > 0 && (
-          <section className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-            <h2 className="text-base font-semibold mb-4">Cold Call Script</h2>
-            <div className="space-y-4 text-sm text-gray-300">
-              <div>
-                <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Opening (10 seconds)</div>
-                <blockquote className="border-l-2 border-blue-500 pl-3 text-gray-200 italic">
-                  &ldquo;Hi, is this the owner of [Business Name]? My name is [YOUR NAME]. This might sound
-                  random — I actually built a website for [Business Name]. It&apos;s already done. Can I text
-                  you the link real quick? Takes 10 seconds to look at. If you like it, we talk. If not,
-                  no worries.&rdquo;
-                </blockquote>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  ['I don\'t need a website', 'Totally fair. Just so you know, someone searching for [type] near [area] wouldn\'t find you right now. That site would fix that. Either way, it\'s there if you ever want it.'],
-                  ['How much?', '[$X]/month — covers hosting, updates, and basic SEO. No contracts, cancel anytime.'],
-                  ['I\'ll think about it', 'For sure. I\'ll text you the link so you have it. If you want it live just let me know, I can have it up same day.'],
-                  ['I already have someone', 'No worries at all. If you ever want a second opinion on your online presence, the offer stands. Have a good one.'],
-                ].map(([objection, response]) => (
-                  <div key={objection} className="bg-gray-800 rounded-lg p-3">
-                    <div className="text-yellow-400 text-xs font-medium mb-1">&ldquo;{objection}&rdquo;</div>
-                    <div className="text-gray-300 text-xs">{response}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
         )}
       </main>
     </div>

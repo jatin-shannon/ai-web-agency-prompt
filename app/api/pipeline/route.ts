@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { searchBusinesses } from '@/lib/places'
 import { checkWebsite } from '@/lib/website-checker'
 import { generateSite } from '@/lib/site-generator'
+import { generateCommunications } from '@/lib/comms-generator'
 import { saveLead, clearLeads } from '@/lib/leads-store'
 import { currentSpendUsd, remainingBudgetUsd, monthlyBudgetUsd } from '@/lib/usage-tracker'
 import { Lead, PlaceResult } from '@/types'
@@ -108,6 +109,28 @@ export async function POST(request: NextRequest) {
           fs.mkdirSync(sitesDir, { recursive: true })
           fs.writeFileSync(path.join(sitesDir, `${slug}.html`), siteHtml)
 
+          send({ type: 'status', message: `Writing call scripts for ${name}…` })
+          let communications: Lead['communications'] = []
+          try {
+            const partialLead = {
+              id: slug,
+              business: name,
+              type: biz.primaryTypeDisplayName?.text ?? 'Local Business',
+              phone: biz.nationalPhoneNumber!,
+              address: biz.formattedAddress,
+              rating: biz.rating ?? 0,
+              reviews: biz.userRatingCount ?? 0,
+              siteUrl: `/sites/${slug}.html`,
+              bestCallTime: getBestCallTime(biz.regularOpeningHours),
+              hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
+              status: '🔴 Not Contacted',
+              communications: [],
+            }
+            communications = await generateCommunications(partialLead)
+          } catch (err) {
+            send({ type: 'error', message: `Comms generation failed for ${name}: ${String(err)}` })
+          }
+
           const lead: Lead = {
             id: slug,
             business: name,
@@ -120,12 +143,13 @@ export async function POST(request: NextRequest) {
             bestCallTime: getBestCallTime(biz.regularOpeningHours),
             hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
             status: '🔴 Not Contacted',
+            communications,
           }
 
           saveLead(lead)
           leads.push(lead)
 
-          send({ type: 'lead_complete', message: `Site built for ${name}`, lead })
+          send({ type: 'lead_complete', message: `Site + scripts ready for ${name}`, lead })
         }
 
         send({

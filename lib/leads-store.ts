@@ -30,6 +30,22 @@ export function updateLeadStatus(id: string, status: string): void {
   fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2))
 }
 
+export function updateCommunication(
+  leadId: string,
+  commId: string,
+  patch: { content?: string; approved?: boolean; sent?: boolean },
+): void {
+  const leads = getLeads()
+  const lead = leads.find(l => l.id === leadId)
+  if (!lead) return
+  const comm = lead.communications?.find(c => c.id === commId)
+  if (!comm) return
+  if (patch.content !== undefined) comm.content = patch.content
+  if (patch.approved !== undefined) comm.approved = patch.approved
+  if (patch.sent !== undefined) comm.sent = patch.sent
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2))
+}
+
 export function clearLeads(): void {
   fs.mkdirSync(path.dirname(LEADS_FILE), { recursive: true })
   fs.writeFileSync(LEADS_FILE, '[]')
