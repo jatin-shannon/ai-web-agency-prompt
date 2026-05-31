@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { Lead } from '@/types'
+import { ActivityEntry, Lead } from '@/types'
 
 // /tmp is the only writable directory in Vercel serverless functions
 const LEADS_FILE = '/tmp/leads.json'
@@ -13,12 +13,16 @@ export function getLeads(): Lead[] {
   }
 }
 
+function write(leads: Lead[]): void {
+  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
+}
+
 export function saveLead(lead: Lead): void {
   const leads = getLeads()
   const idx = leads.findIndex(l => l.id === lead.id)
   if (idx >= 0) leads[idx] = lead
   else leads.push(lead)
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
+  write(leads)
 }
 
 export function updateLeadStatus(id: string, status: string): void {
@@ -26,7 +30,32 @@ export function updateLeadStatus(id: string, status: string): void {
   const lead = leads.find(l => l.id === id)
   if (!lead) return
   lead.status = status
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
+  write(leads)
+}
+
+export function updateLeadNotes(id: string, notes: string): void {
+  const leads = getLeads()
+  const lead = leads.find(l => l.id === id)
+  if (!lead) return
+  lead.notes = notes
+  write(leads)
+}
+
+export function updateFollowUpDate(id: string, followUpDate: string | null): void {
+  const leads = getLeads()
+  const lead = leads.find(l => l.id === id)
+  if (!lead) return
+  if (followUpDate) lead.followUpDate = followUpDate
+  else delete lead.followUpDate
+  write(leads)
+}
+
+export function addActivityEntry(leadId: string, entry: ActivityEntry): void {
+  const leads = getLeads()
+  const lead = leads.find(l => l.id === leadId)
+  if (!lead) return
+  lead.activityLog = [...(lead.activityLog ?? []), entry]
+  write(leads)
 }
 
 export function updateCommunication(
@@ -42,9 +71,10 @@ export function updateCommunication(
   if (patch.content !== undefined) comm.content = patch.content
   if (patch.approved !== undefined) comm.approved = patch.approved
   if (patch.sent !== undefined) comm.sent = patch.sent
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads))
+  write(leads)
 }
 
 export function clearLeads(): void {
-  fs.writeFileSync(LEADS_FILE, '[]')
+  write([])
 }
+

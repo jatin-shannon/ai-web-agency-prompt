@@ -9,12 +9,17 @@ const COMM_LABELS: Record<Communication['id'], string> = {
   'text-day2':    'Text — Day 2 Follow-up',
   'text-day5':    'Text — Day 5 Follow-up',
   'text-day10':   'Text — Day 10 (final)',
+  'email-intro':  'Email — Introduction',
 }
+
+const COMM_IDS: Communication['id'][] = [
+  'cold-call', 'text-day0', 'text-day2', 'text-day5', 'text-day10', 'email-intro',
+]
 
 export async function generateCommunications(lead: Pick<Lead, 'business' | 'type' | 'phone' | 'rating' | 'reviews' | 'address' | 'siteUrl'>): Promise<Communication[]> {
   const requestParams = {
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     messages: [
       {
         role: 'user' as const,
@@ -34,7 +39,8 @@ Generate exactly this JSON shape:
   "text-day0": "<SMS under 160 chars to send right after the call. Casual. Includes [SITE_URL]. References ${lead.business} by name.>",
   "text-day2": "<SMS under 160 chars. Day 2 check-in. Warm, not pushy. References ${lead.business}.>",
   "text-day5": "<SMS under 160 chars. Day 5. Gentle urgency — mention you're taking on more businesses in the area this month.>",
-  "text-day10": "<SMS under 160 chars. Final message. Graceful, no pressure close. Wish them well.>"
+  "text-day10": "<SMS under 160 chars. Final message. Graceful, no pressure close. Wish them well.>",
+  "email-intro": "<Professional intro email. Format as: Subject: [subject line]\\n\\n[2-3 paragraph body — introduce yourself, mention you built their site and why it matters to their business, include [SITE_URL], end with a clear next step]. Sign off with your name placeholder. Under 300 words total.>"
 }`,
       },
     ],
@@ -60,7 +66,7 @@ Generate exactly this JSON shape:
 
   const parsed = JSON.parse(raw) as Record<Communication['id'], string>
 
-  return (['cold-call', 'text-day0', 'text-day2', 'text-day5', 'text-day10'] as Communication['id'][]).map(id => ({
+  return COMM_IDS.map(id => ({
     id,
     label: COMM_LABELS[id],
     content: parsed[id] ?? '',
