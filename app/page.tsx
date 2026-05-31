@@ -36,7 +36,10 @@ function CommPanel({
   const toggleApprove = (comm: Communication) =>
     onUpdate(lead.id, comm.id, { content: drafts[comm.id] ?? comm.content, approved: !comm.approved })
   const toggleSent = (comm: Communication) =>
-    onUpdate(lead.id, comm.id, { sent: !comm.sent })
+    onUpdate(lead.id, comm.id, {
+      sent: !comm.sent,
+      sentAt: !comm.sent ? new Date().toISOString() : undefined,
+    })
 
   if (!lead.communications?.length) {
     return (
@@ -70,7 +73,11 @@ function CommPanel({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-300">{comm.label}</span>
                 <div className="flex items-center gap-2">
-                  {comm.sent && <span className="text-xs text-blue-400 font-medium">Sent</span>}
+                  {comm.sent && (
+                  <span className="text-xs text-blue-400 font-medium">
+                    Sent{comm.sentAt ? ` · ${new Date(comm.sentAt).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}` : ''}
+                  </span>
+                )}
                   {comm.approved && <span className="text-xs text-green-400 font-medium">&#10003; Approved</span>}
                 </div>
               </div>
@@ -234,6 +241,7 @@ function NotePanel({
 
 export default function Home() {
   const [city, setCity] = useState('')
+  const [cities, setCities] = useState<string[]>([])  // multi-city tags (area mode)
   const [searchMode, setSearchMode] = useState<'area' | 'radius'>('area')
   const [radiusKm, setRadiusKm] = useState(5)
   const [selectedPlaceId, setSelectedPlaceId] = useState('')
@@ -242,6 +250,7 @@ export default function Home() {
   const [locationError, setLocationError] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputWrapRef = useRef<HTMLDivElement>(null)
+  const [showThumbnail, setShowThumbnail] = useState<Set<string>>(new Set())
 
   const [appStage, setAppStage] = useState<AppStage>('idle')
   const [leads, setLeads] = useState<Lead[]>([])
@@ -433,9 +442,26 @@ export default function Home() {
     onDone()
   }
 
+  const addCityTag = () => {
+    const trimmed = city.trim()
+    if (trimmed.length >= 2 && !cities.includes(trimmed)) {
+      setCities(prev => [...prev, trimmed])
+    }
+    setCity('')
+    setSelectedPlaceId('')
+    setSuggestions([])
+    setShowSuggestions(false)
+  }
+
   const runDiscover = async () => {
-    if (!city.trim()) { setLocationError('Please enter a city, suburb or neighbourhood'); return }
-    if (city.trim().length < 3) { setLocationError('Please enter at least 3 characters'); return }
+    // In area mode: use tags list if populated, else fall back to current input
+    const allCities = searchMode === 'area' && cities.length > 0
+      ? cities
+      : city.trim() ? [city.trim()] : []
+
+    if (allCities.length === 0) { setLocationError('Please enter a city, suburb or neighbourhood'); return }
+    if (allCities.some(c => c.length < 2)) { setLocationError('City names must be at least 2 characters'); return }
+
     setAppStage('discovering')
     setDiscoverLog([])
     setBuildLog([])
@@ -445,12 +471,11 @@ export default function Home() {
     setLocationError('')
     setShowSuggestions(false)
     localStorage.removeItem('ai-agency-leads')
-    // Clear previously saved Blob results so they don't bleed into the new session
     fetch('/api/leads/saved', { method: 'DELETE' }).catch(() => {})
     try {
       await readStream(
         '/api/pipeline/discover',
-        { city: city.trim(), searchMode, radiusKm, placeId: selectedPlaceId || undefined },
+        { cities: allCities, searchMode, radiusKm, placeId: selectedPlaceId || undefined },
         (event) => {
           if (event.type === 'lead_discovered') {
             setLeads(prev => [...prev, event.lead])
@@ -655,6 +680,7 @@ export default function Home() {
                 onClick={() => {
                   setAppStage('idle')
                   setLeads([])
+                  setCities([])
                   setDiscoverLog([])
                   setBuildLog([])
                   localStorage.removeItem('ai-agency-leads')
@@ -695,40 +721,82 @@ export default function Home() {
             </div>
           )}
 
+          {/* City tags (area mode multi-city) */}
+          {searchMode === 'area' && cities.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {cities.map(c => (
+                <span key={c} className="flex items-center gap-1 bg-blue-900/40 border border-blue-700/60 rounded-full px-2.5 py-1 text-xs text-blue-200">
+                  {c}
+                  <button
+                    onClick={() => setCities(prev => prev.filter(x => x !== c))}
+                    className="text-blue-400 hover:text-white transition-colors ml-0.5 leading-none"
+                    aria-label={`Remove ${c}`}
+                  >×</button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="flex gap-3">
-            <div ref={inputWrapRef} className="flex-1 relative">
-              <input
-                type="text"
-                value={city}
-                onChange={e => handleCityChange(e.target.value)}
-                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { setShowSuggestions(false); runDiscover() }
-                  if (e.key === 'Escape') setShowSuggestions(false)
-                }}
-                placeholder={searchMode === 'radius' ? 'e.g. Santa Monica — pick from dropdown to pin radius' : 'e.g. Santa Monica, CA'}
-                disabled={isRunning}
-                className={`w-full bg-gray-800 rounded-lg px-4 py-3 placeholder-gray-500 border focus:outline-none disabled:opacity-50 text-sm transition-colors ${
-                  locationError ? 'border-red-500' : 'border-gray-700 focus:border-blue-500'
-                }`}
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-20 overflow-hidden">
-                  {suggestions.map(s => (
-                    <button
-                      key={s.placeId}
-                      onMouseDown={() => selectSuggestion(s)}
-                      className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-0"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
+            <div className="flex-1 flex gap-2">
+              <div ref={inputWrapRef} className="flex-1 relative">
+                <input
+                  type="text"
+                  value={city}
+                  onChange={e => handleCityChange(e.target.value)}
+                  onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      setShowSuggestions(false)
+                      if (searchMode === 'area' && cities.length > 0 && city.trim().length >= 2) {
+                        addCityTag()
+                      } else {
+                        runDiscover()
+                      }
+                    }
+                    if (e.key === 'Escape') setShowSuggestions(false)
+                  }}
+                  placeholder={
+                    searchMode === 'radius'
+                      ? 'e.g. Santa Monica — pick from dropdown to pin radius'
+                      : cities.length > 0
+                      ? 'Add another city…'
+                      : 'e.g. Santa Monica, CA'
+                  }
+                  disabled={isRunning}
+                  className={`w-full bg-gray-800 rounded-lg px-4 py-3 placeholder-gray-500 border focus:outline-none disabled:opacity-50 text-sm transition-colors ${
+                    locationError ? 'border-red-500' : 'border-gray-700 focus:border-blue-500'
+                  }`}
+                />
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-20 overflow-hidden">
+                    {suggestions.map(s => (
+                      <button
+                        key={s.placeId}
+                        onMouseDown={() => selectSuggestion(s)}
+                        className="w-full text-left px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-0"
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* "+ Add city" button — area mode only */}
+              {searchMode === 'area' && (
+                <button
+                  onClick={addCityTag}
+                  disabled={isRunning || city.trim().length < 2}
+                  title="Add another city to search"
+                  className="px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-sm font-bold transition-colors"
+                >
+                  +
+                </button>
               )}
             </div>
             <button
               onClick={runDiscover}
-              disabled={isRunning || !city.trim()}
+              disabled={isRunning || (cities.length === 0 && !city.trim())}
               className="px-6 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg font-medium text-sm transition-colors whitespace-nowrap"
             >
               {appStage === 'discovering' ? (
@@ -872,6 +940,7 @@ export default function Home() {
                     const comms = lead.communications ?? []
                     const approved = approvedCount(comms)
                     const allApproved = comms.length > 0 && approved === comms.length
+                    const sentCount = comms.filter(c => c.sent).length
                     const isSelected = selectedLeadIds.has(lead.id)
                     const isBuilt = lead.stage === 'built'
 
@@ -934,16 +1003,46 @@ export default function Home() {
                                   </span>
                                 ) : isBuilt && lead.siteUrl ? (
                                   <div className="flex flex-col gap-1.5">
-                                    <a href={lead.siteUrl} target="_blank" rel="noopener noreferrer"
-                                      className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap">
-                                      View Site &rarr;
-                                    </a>
+                                    <div className="flex items-center gap-2">
+                                      <a href={lead.siteUrl} target="_blank" rel="noopener noreferrer"
+                                        className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap">
+                                        View Site &rarr;
+                                      </a>
+                                      {lead.siteScore !== undefined && (
+                                        <span className={`text-xs px-1.5 py-0.5 rounded font-mono font-bold ${
+                                          lead.siteScore >= 85 ? 'text-green-300 bg-green-950 border border-green-800' :
+                                          lead.siteScore >= 65 ? 'text-yellow-300 bg-yellow-950 border border-yellow-800' :
+                                          'text-red-300 bg-red-950 border border-red-800'
+                                        }`} title={`Site quality score: ${lead.siteScore}/100`}>
+                                          {lead.siteScore}
+                                        </span>
+                                      )}
+                                    </div>
                                     <button
                                       onClick={() => navigator.clipboard.writeText(shareUrl(lead)).catch(() => {})}
                                       className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
                                     >
                                       ⎘ Copy share link
                                     </button>
+                                    <button
+                                      onClick={() => setShowThumbnail(prev => {
+                                        const next = new Set(prev)
+                                        if (next.has(lead.id)) next.delete(lead.id); else next.add(lead.id)
+                                        return next
+                                      })}
+                                      className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
+                                    >
+                                      {showThumbnail.has(lead.id) ? 'Hide preview' : '⬜ Preview'}
+                                    </button>
+                                    {showThumbnail.has(lead.id) && (
+                                      <div className="mt-1 rounded-md overflow-hidden border border-gray-700" style={{ width: 200, height: 130, position: 'relative' }}>
+                                        <iframe
+                                          src={shareUrl(lead)}
+                                          title={`Preview of ${lead.business}`}
+                                          style={{ width: 1024, height: 667, transform: 'scale(0.195)', transformOrigin: 'top left', pointerEvents: 'none', border: 'none' }}
+                                        />
+                                      </div>
+                                    )}
                                     <button
                                       onClick={() => { setRegenOpen(regenOpen === lead.id ? null : lead.id); setRegenText('') }}
                                       className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
@@ -976,17 +1075,22 @@ export default function Home() {
                               </td>
                               <td className="px-4 py-4">
                                 {isBuilt ? (
-                                  <button
-                                    onClick={() => setExpandedLead(isExpanded ? null : lead.id)}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
-                                      allApproved
-                                        ? 'bg-green-800/50 text-green-300 border border-green-700'
-                                        : isExpanded ? 'bg-blue-700 text-white'
-                                        : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                                    }`}
-                                  >
-                                    {allApproved ? '✓ All Approved' : `Scripts ${approved}/${comms.length}`}
-                                  </button>
+                                  <div className="flex flex-col items-start gap-1">
+                                    <button
+                                      onClick={() => setExpandedLead(isExpanded ? null : lead.id)}
+                                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                                        allApproved
+                                          ? 'bg-green-800/50 text-green-300 border border-green-700'
+                                          : isExpanded ? 'bg-blue-700 text-white'
+                                          : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                                      }`}
+                                    >
+                                      {allApproved ? '✓ All Approved' : `Scripts ${approved}/${comms.length}`}
+                                    </button>
+                                    {sentCount > 0 && (
+                                      <span className="text-xs text-blue-500">{sentCount}/{comms.length} sent</span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <span className="text-xs text-gray-600">&mdash;</span>
                                 )}

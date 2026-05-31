@@ -124,7 +124,7 @@ export async function addActivityEntry(leadId: string, entry: ActivityEntry): Pr
 export async function updateCommunication(
   leadId: string,
   commId: string,
-  patch: { content?: string; approved?: boolean; sent?: boolean },
+  patch: { content?: string; approved?: boolean; sent?: boolean; sentAt?: string },
 ): Promise<void> {
   const leads = readTmp()
   const lead = leads.find(l => l.id === leadId)
@@ -134,6 +134,7 @@ export async function updateCommunication(
       if (patch.content !== undefined) comm.content = patch.content
       if (patch.approved !== undefined) comm.approved = patch.approved
       if (patch.sent !== undefined) comm.sent = patch.sent
+      if (patch.sentAt !== undefined) comm.sentAt = patch.sentAt
       writeTmp(leads)
     }
   }
