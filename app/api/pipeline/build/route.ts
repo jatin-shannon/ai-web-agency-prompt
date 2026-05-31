@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { randomBytes } from 'crypto'
 import { put } from '@vercel/blob'
 import { generateSite } from '@/lib/site-generator'
 import { generateCommunications } from '@/lib/comms-generator'
@@ -102,6 +103,7 @@ export async function POST(request: NextRequest) {
             ...lead,
             stage: 'built',
             siteUrl,
+            shareToken: lead.shareToken ?? randomBytes(16).toString('hex'),
             communications,
             htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
           }

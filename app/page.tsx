@@ -735,16 +735,10 @@ export default function Home() {
                                       View Site &rarr;
                                     </a>
                                     <button
-                                      onClick={async () => {
+                                      onClick={() => {
                                         const base = `${window.location.origin}${lead.siteUrl}`
-                                        try {
-                                          const res = await fetch('/api/share-token')
-                                          const { token } = await res.json()
-                                          const url = token ? `${base}?token=${token}` : base
-                                          await navigator.clipboard.writeText(url)
-                                        } catch {
-                                          await navigator.clipboard.writeText(base).catch(() => {})
-                                        }
+                                        const url = lead.shareToken ? `${base}?token=${lead.shareToken}` : base
+                                        navigator.clipboard.writeText(url).catch(() => {})
                                       }}
                                       className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
                                     >
