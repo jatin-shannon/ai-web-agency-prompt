@@ -269,13 +269,22 @@ export default function Home() {
   const [regenText, setRegenText] = useState('')
   const [regenBuilding, setRegenBuilding] = useState<string | null>(null)
 
+  // Normalise legacy leads that stored a raw Blob CDN URL as siteUrl.
+  // Blob CDN serves HTML with Content-Disposition: attachment, causing downloads.
+  const normalizeLead = (lead: Lead): Lead => {
+    if (lead.siteUrl?.includes('blob.vercel-storage.com')) {
+      return { ...lead, siteUrl: `/api/sites/${lead.id}` }
+    }
+    return lead
+  }
+
   useEffect(() => {
     // 1. Restore from localStorage first (fast, synchronous)
     let localLeads: Lead[] = []
     try {
       const stored = localStorage.getItem('ai-agency-leads')
       if (stored) {
-        const parsed = JSON.parse(stored) as Lead[]
+        const parsed = (JSON.parse(stored) as Lead[]).map(normalizeLead)
         if (parsed.length > 0) {
           localLeads = parsed
           setLeads(parsed)
@@ -296,7 +305,7 @@ export default function Home() {
       try {
         const res = await fetch('/api/leads')
         if (!res.ok) throw new Error('leads API failed')
-        const remote: Lead[] = await res.json()
+        const remote: Lead[] = (await res.json() as Lead[]).map(normalizeLead)
         if (remote.length > 0) {
           setLeads(prev => {
             const map = new Map(prev.map(l => [l.id, l]))
@@ -318,7 +327,7 @@ export default function Home() {
         if (!saved?.length) return
         setLeads(prev => {
           const map = new Map(prev.map(l => [l.id, l]))
-          for (const sl of saved) {
+          for (const sl of saved.map(normalizeLead)) {
             const existing = map.get(sl.id)
             if (!existing || sl.stage === 'built') map.set(sl.id, sl)
           }
@@ -1004,7 +1013,7 @@ export default function Home() {
                                 ) : isBuilt && lead.siteUrl ? (
                                   <div className="flex flex-col gap-1.5">
                                     <div className="flex items-center gap-2">
-                                      <a href={lead.siteUrl} target="_blank" rel="noopener noreferrer"
+                                      <a href={shareUrl(lead)} target="_blank" rel="noopener noreferrer"
                                         className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap">
                                         View Site &rarr;
                                       </a>
