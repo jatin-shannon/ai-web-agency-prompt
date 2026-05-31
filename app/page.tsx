@@ -281,24 +281,44 @@ export default function Home() {
       }
     } catch {}
 
-    // 2. Merge in any build results persisted to Blob — covers the case where the
-    //    user closed the tab mid-build and server-side results finished after they left.
-    fetch('/api/leads/saved')
-      .then(r => r.json())
-      .then(({ leads: saved }: { leads: Lead[] }) => {
+    // 2. Load from Firestore (authoritative) — covers closed tabs and cross-device access.
+    //    Falls back to Blob-persisted results when Firestore is not configured.
+    const loadRemote = async () => {
+      try {
+        const res = await fetch('/api/leads')
+        if (!res.ok) throw new Error('leads API failed')
+        const remote: Lead[] = await res.json()
+        if (remote.length > 0) {
+          setLeads(prev => {
+            const map = new Map(prev.map(l => [l.id, l]))
+            for (const rl of remote) {
+              const existing = map.get(rl.id)
+              if (!existing || rl.stage === 'built') map.set(rl.id, rl)
+            }
+            return Array.from(map.values())
+          })
+          setAppStage(prev => (prev === 'idle' ? 'complete' : prev))
+          return
+        }
+      } catch {}
+      // Fallback to Blob when Firestore not configured
+      try {
+        const res = await fetch('/api/leads/saved')
+        if (!res.ok) return
+        const { leads: saved }: { leads: Lead[] } = await res.json()
         if (!saved?.length) return
         setLeads(prev => {
           const map = new Map(prev.map(l => [l.id, l]))
           for (const sl of saved) {
             const existing = map.get(sl.id)
-            // Only overwrite with a 'built' record — never downgrade
             if (!existing || sl.stage === 'built') map.set(sl.id, sl)
           }
           return Array.from(map.values())
         })
         setAppStage(prev => (prev === 'idle' ? 'complete' : prev))
-      })
-      .catch(() => {})
+      } catch {}
+    }
+    loadRemote()
   }, [])
 
   useEffect(() => {

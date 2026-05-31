@@ -10,7 +10,7 @@ import {
 import { ActivityEntry } from '@/types'
 
 export async function GET() {
-  return NextResponse.json(getLeads())
+  return NextResponse.json(await getLeads())
 }
 
 export async function PATCH(request: NextRequest) {
@@ -20,12 +20,12 @@ export async function PATCH(request: NextRequest) {
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
   if (body.status !== undefined) {
-    updateLeadStatus(id, body.status)
+    await updateLeadStatus(id, body.status)
     return NextResponse.json({ ok: true })
   }
 
   if (body.commId) {
-    updateCommunication(id, body.commId, {
+    await updateCommunication(id, body.commId, {
       content: body.content,
       approved: body.approved,
       sent: body.sent,
@@ -34,17 +34,17 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (body.notes !== undefined) {
-    updateLeadNotes(id, body.notes)
+    await updateLeadNotes(id, body.notes)
     return NextResponse.json({ ok: true })
   }
 
   if ('followUpDate' in body) {
-    updateFollowUpDate(id, body.followUpDate ?? null)
+    await updateFollowUpDate(id, body.followUpDate ?? null)
     return NextResponse.json({ ok: true })
   }
 
   if (body.activityEntry) {
-    addActivityEntry(id, body.activityEntry as ActivityEntry)
+    await addActivityEntry(id, body.activityEntry as ActivityEntry)
     return NextResponse.json({ ok: true })
   }
 
