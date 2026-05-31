@@ -15,6 +15,7 @@ export interface Lead {
   rating: number
   reviews: number
   siteUrl?: string           // present only after build phase
+  shareToken?: string        // random token for password-protected share links
   bestCallTime: string
   hook: string
   status: string
