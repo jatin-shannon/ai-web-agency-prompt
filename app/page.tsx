@@ -141,6 +141,11 @@ export default function Home() {
   const discoverLogRef = useRef<HTMLDivElement>(null)
   const buildLogRef = useRef<HTMLDivElement>(null)
 
+  // Regenerate state: leadId → instructions text / building flag
+  const [regenOpen, setRegenOpen] = useState<string | null>(null)
+  const [regenText, setRegenText] = useState('')
+  const [regenBuilding, setRegenBuilding] = useState<string | null>(null)
+
   useEffect(() => {
     // 1. Restore from localStorage first (fast, synchronous)
     let localLeads: Lead[] = []
@@ -413,6 +418,29 @@ export default function Home() {
       setBuildLog(prev => [...prev, { type: 'error', message: String(err) }])
       setAppStage('complete')
     }
+  }
+
+  const runRegen = async (lead: Lead) => {
+    setRegenBuilding(lead.id)
+    setRegenOpen(null)
+    setBuildLog([])
+    try {
+      await readStream(
+        '/api/pipeline/build',
+        { leadIds: [lead.id], leads: [lead], extraInstructions: regenText.trim() },
+        (event) => {
+          if (event.type === 'lead_complete') {
+            setLeads(prev => prev.map(l => l.id === event.lead.id ? event.lead : l))
+          }
+        },
+        () => setRegenBuilding(null),
+        (line) => setBuildLog(prev => [...prev, line]),
+      )
+    } catch (err) {
+      setBuildLog(prev => [...prev, { type: 'error', message: String(err) }])
+      setRegenBuilding(null)
+    }
+    setRegenText('')
   }
 
   return (
@@ -695,11 +723,57 @@ export default function Home() {
                           {appStage !== 'discovered' && (
                             <>
                               <td className="px-4 py-4">
-                                {isBuilt && lead.siteUrl ? (
-                                  <a href={lead.siteUrl} target="_blank" rel="noopener noreferrer"
-                                    className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap">
-                                    View Site &rarr;
-                                  </a>
+                                {regenBuilding === lead.id ? (
+                                  <span className="flex items-center gap-1.5 text-xs text-yellow-400">
+                                    <span className="w-2.5 h-2.5 rounded-full border-2 border-yellow-400 border-t-transparent animate-spin" />
+                                    Regenerating&hellip;
+                                  </span>
+                                ) : isBuilt && lead.siteUrl ? (
+                                  <div className="flex flex-col gap-1.5">
+                                    <a href={lead.siteUrl} target="_blank" rel="noopener noreferrer"
+                                      className="text-blue-400 hover:text-blue-300 underline text-sm whitespace-nowrap">
+                                      View Site &rarr;
+                                    </a>
+                                    <button
+                                      onClick={async () => {
+                                        const base = `${window.location.origin}${lead.siteUrl}`
+                                        try {
+                                          const res = await fetch('/api/share-token')
+                                          const { token } = await res.json()
+                                          const url = token ? `${base}?token=${token}` : base
+                                          await navigator.clipboard.writeText(url)
+                                        } catch {
+                                          await navigator.clipboard.writeText(base).catch(() => {})
+                                        }
+                                      }}
+                                      className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
+                                    >
+                                      ⎘ Copy share link
+                                    </button>
+                                    <button
+                                      onClick={() => { setRegenOpen(regenOpen === lead.id ? null : lead.id); setRegenText('') }}
+                                      className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
+                                    >
+                                      {regenOpen === lead.id ? 'Cancel' : '↺ Regenerate'}
+                                    </button>
+                                    {regenOpen === lead.id && (
+                                      <div className="flex flex-col gap-1.5 mt-1 min-w-[220px]">
+                                        <textarea
+                                          value={regenText}
+                                          onChange={e => setRegenText(e.target.value)}
+                                          placeholder="Instructions (optional): e.g. darker theme, add a specials section, more formal tone…"
+                                          rows={3}
+                                          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200 resize-none focus:outline-none focus:border-yellow-500"
+                                        />
+                                        <button
+                                          onClick={() => runRegen(lead)}
+                                          className="px-3 py-1.5 bg-yellow-700 hover:bg-yellow-600 rounded text-xs font-medium text-white transition-colors"
+                                        >
+                                          Rebuild Site
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 ) : isSelected ? (
                                   <span className="text-xs text-gray-500 italic">Building&hellip;</span>
                                 ) : (
