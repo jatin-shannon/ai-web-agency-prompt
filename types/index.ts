@@ -4,6 +4,7 @@ export interface Communication {
   content: string
   approved: boolean
   sent: boolean
+  sentAt?: string  // ISO timestamp when marked sent
 }
 
 export interface ActivityEntry {
@@ -33,6 +34,7 @@ export interface Lead {
   notes?: string
   followUpDate?: string      // ISO date string e.g. "2026-06-15"
   activityLog?: ActivityEntry[]
+  siteScore?: number         // 0-100 quality score computed after build
 }
 
 export interface PlaceResult {

@@ -16,14 +16,22 @@ function getBestCallTime(hours?: PlaceResult['regularOpeningHours']): string {
 
 export async function POST(request: NextRequest) {
   const body = await request.json()
-  const city: string = (body.city ?? '').trim()
+
+  // Accept either cities[] (multi-city) or city (single, legacy)
+  const rawCities: string[] = body.cities?.length > 0
+    ? body.cities.map((c: string) => c.trim()).filter(Boolean)
+    : (body.city ?? '').trim() ? [(body.city ?? '').trim()]
+    : []
+
   const placeId: string = (body.placeId ?? '').trim()
   const searchMode: string = body.searchMode ?? 'area'
   const radiusKm: number = Math.max(1, Math.min(50, Number(body.radiusKm) || 5))
 
-  if (!city) {
+  if (rawCities.length === 0) {
     return new Response('City is required', { status: 400 })
   }
+
+  const isMultiCity = rawCities.length > 1
 
   const encoder = new TextEncoder()
 
@@ -36,7 +44,12 @@ export async function POST(request: NextRequest) {
       try {
         await clearLeads()
 
-        const modeDesc = searchMode === 'radius' && placeId ? `within ${radiusKm} km of ${city}` : city
+        const modeDesc = isMultiCity
+          ? rawCities.join(', ')
+          : searchMode === 'radius' && placeId
+          ? `within ${radiusKm} km of ${rawCities[0]}`
+          : rawCities[0]
+
         send({ type: 'status', message: `Scanning for leads in ${modeDesc}…` })
 
         const spent = currentSpendUsd().toFixed(2)
@@ -47,79 +60,91 @@ export async function POST(request: NextRequest) {
           message: `Google budget: $${spent} spent · $${remaining} remaining of $${budget}/month limit`,
         })
 
-        send({ type: 'status', message: 'Searching 14 business categories on Google Maps…' })
-
-        let businesses: PlaceResult[]
-        try {
-          businesses = await searchBusinesses(
-            city,
-            searchMode === 'radius' && placeId ? { placeId, radiusKm } : undefined,
-          )
-        } catch (err) {
-          send({ type: 'error', message: `Google Places API error: ${String(err)}` })
-          controller.close()
-          return
-        }
-
-        send({ type: 'status', message: `Found ${businesses.length} listings — checking for working websites…` })
+        send({ type: 'status', message: `Searching 14 business categories on Google Maps…` })
 
         const leads: Lead[] = []
+        const seenIds = new Set<string>()
 
-        for (const biz of businesses) {
+        for (const searchCity of rawCities) {
           if (leads.length >= 30) break
 
-          const name = biz.displayName.text
-
-          if (biz.businessStatus && biz.businessStatus !== 'OPERATIONAL') {
-            send({ type: 'skip', message: `${name} — not operational` })
-            continue
-          }
-          if ((biz.userRatingCount ?? 0) < 5) {
-            send({ type: 'skip', message: `${name} — fewer than 5 reviews` })
-            continue
-          }
-          if (!biz.nationalPhoneNumber) {
-            send({ type: 'skip', message: `${name} — no phone number` })
+          let businesses: PlaceResult[]
+          try {
+            businesses = await searchBusinesses(
+              searchCity,
+              !isMultiCity && searchMode === 'radius' && placeId ? { placeId, radiusKm } : undefined,
+            )
+          } catch (err) {
+            send({ type: 'error', message: `Google Places API error for ${searchCity}: ${String(err)}` })
             continue
           }
 
-          if (biz.websiteUri) {
-            const working = await checkWebsite(biz.websiteUri)
-            if (working) {
-              send({ type: 'skip', message: `${name} — has a working website` })
+          send({
+            type: 'status',
+            message: isMultiCity
+              ? `${searchCity}: ${businesses.length} listings found — checking websites…`
+              : `Found ${businesses.length} listings — checking for working websites…`,
+          })
+
+          for (const biz of businesses) {
+            if (leads.length >= 30) break
+
+            const name = biz.displayName.text
+
+            if (biz.businessStatus && biz.businessStatus !== 'OPERATIONAL') {
+              send({ type: 'skip', message: `${name} — not operational` })
               continue
             }
-            // Facebook / Yelp / Instagram pages are not real websites — business qualifies
+            if ((biz.userRatingCount ?? 0) < 5) {
+              send({ type: 'skip', message: `${name} — fewer than 5 reviews` })
+              continue
+            }
+            if (!biz.nationalPhoneNumber) {
+              send({ type: 'skip', message: `${name} — no phone number` })
+              continue
+            }
+
+            if (biz.websiteUri) {
+              const working = await checkWebsite(biz.websiteUri)
+              if (working) {
+                send({ type: 'skip', message: `${name} — has a working website` })
+                continue
+              }
+            }
+
+            const slug = name
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .replace(/^-+|-+$/g, '')
+
+            // Deduplicate across cities
+            if (seenIds.has(slug)) continue
+            seenIds.add(slug)
+
+            const lead: Lead = {
+              id: slug,
+              business: name,
+              type: biz.primaryTypeDisplayName?.text ?? 'Local Business',
+              phone: biz.nationalPhoneNumber!,
+              address: biz.formattedAddress,
+              rating: biz.rating ?? 0,
+              reviews: biz.userRatingCount ?? 0,
+              bestCallTime: getBestCallTime(biz.regularOpeningHours),
+              hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
+              status: '🔴 Not Contacted',
+              stage: 'discovered',
+              communications: [],
+              openingHours: biz.regularOpeningHours?.weekdayDescriptions,
+            }
+
+            await saveLead(lead)
+            leads.push(lead)
+            send({
+              type: 'lead_discovered',
+              message: `${name} · ${biz.rating ?? 'N/A'}★ · ${biz.userRatingCount ?? 0} reviews`,
+              lead,
+            })
           }
-
-          const slug = name
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-
-          const lead: Lead = {
-            id: slug,
-            business: name,
-            type: biz.primaryTypeDisplayName?.text ?? 'Local Business',
-            phone: biz.nationalPhoneNumber!,
-            address: biz.formattedAddress,
-            rating: biz.rating ?? 0,
-            reviews: biz.userRatingCount ?? 0,
-            bestCallTime: getBestCallTime(biz.regularOpeningHours),
-            hook: `${biz.rating ?? 0}★ · ${biz.userRatingCount ?? 0} reviews · no website`,
-            status: '🔴 Not Contacted',
-            stage: 'discovered',
-            communications: [],
-            openingHours: biz.regularOpeningHours?.weekdayDescriptions,
-          }
-
-          await saveLead(lead)
-          leads.push(lead)
-          send({
-            type: 'lead_discovered',
-            message: `${name} · ${biz.rating ?? 'N/A'}★ · ${biz.userRatingCount ?? 0} reviews`,
-            lead,
-          })
         }
 
         send({

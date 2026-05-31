@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import { put } from '@vercel/blob'
 import { generateSite } from '@/lib/site-generator'
 import { generateCommunications } from '@/lib/comms-generator'
+import { scoreHtml } from '@/lib/quality-scorer'
 import { getLeads, saveLead } from '@/lib/leads-store'
 import { Lead, PlaceResult } from '@/types'
 
@@ -99,12 +100,15 @@ export async function POST(request: NextRequest) {
             send({ type: 'error', message: `Script generation failed for ${lead.business}: ${String(err)}` })
           }
 
+          const siteScore = scoreHtml(siteHtml)
+
           const updatedLead: Lead = {
             ...lead,
             stage: 'built',
             siteUrl,
             shareToken: lead.shareToken ?? randomBytes(16).toString('hex'),
             communications,
+            siteScore,
             htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
           }
 
