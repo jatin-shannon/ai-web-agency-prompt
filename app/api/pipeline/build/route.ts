@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const source = clientLeads.length > 0 ? clientLeads : getLeads()
+        const source = clientLeads.length > 0 ? clientLeads : await getLeads()
         const toBuild = source.filter(l => leadIds.includes(l.id))
 
         if (toBuild.length === 0) {
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
             htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
           }
 
-          saveLead(updatedLead)
+          await saveLead(updatedLead)
           built.push(updatedLead)
 
           // Persist lead JSON to Blob so results survive if the browser tab was closed.

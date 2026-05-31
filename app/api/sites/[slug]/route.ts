@@ -5,7 +5,7 @@ import { Lead } from '@/types'
 
 async function findLead(slug: string): Promise<Lead | null> {
   // 1. Fast path: in-memory /tmp store (same Vercel instance)
-  const leads = getLeads()
+  const leads = await getLeads()
   const local = leads.find(l => l.id === slug)
   if (local) return local
 

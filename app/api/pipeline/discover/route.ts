@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        clearLeads()
+        await clearLeads()
 
         const modeDesc = searchMode === 'radius' && placeId ? `within ${radiusKm} km of ${city}` : city
         send({ type: 'status', message: `Scanning for leads in ${modeDesc}…` })
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
             openingHours: biz.regularOpeningHours?.weekdayDescriptions,
           }
 
-          saveLead(lead)
+          await saveLead(lead)
           leads.push(lead)
           send({
             type: 'lead_discovered',
