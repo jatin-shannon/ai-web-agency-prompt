@@ -3,9 +3,23 @@ import { list } from '@vercel/blob'
 import { getLeads } from '@/lib/leads-store'
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { slug: string } },
 ) {
+  // Optional share-token protection. If SITE_SHARE_TOKEN is set in env vars,
+  // the request must include ?token=<value> to view the site. This lets you
+  // share a link with a prospective customer without exposing all sites publicly.
+  const shareToken = process.env.SITE_SHARE_TOKEN
+  if (shareToken) {
+    const provided = request.nextUrl.searchParams.get('token')
+    if (provided !== shareToken) {
+      return new Response(
+        '<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:4rem"><h2>Preview unavailable</h2><p>This link requires an access token.</p></body></html>',
+        { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+      )
+    }
+  }
+
   const htmlHeaders = { 'Content-Type': 'text/html; charset=utf-8' }
 
   // 1. Try in-memory /tmp store (fast path — works on same Vercel instance)

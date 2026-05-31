@@ -12,9 +12,8 @@ export const maxDuration = 300
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const leadIds: string[] = body.leadIds ?? []
-  // Client passes full lead objects to avoid cross-instance /tmp misses on Vercel.
-  // Fall back to reading /tmp only when leads are not provided (e.g. direct API calls).
   const clientLeads: Lead[] = body.leads ?? []
+  const extraInstructions: string = (body.extraInstructions ?? '').trim()
 
   if (leadIds.length === 0) {
     return new Response('leadIds is required', { status: 400 })
@@ -61,7 +60,7 @@ export async function POST(request: NextRequest) {
 
           let siteHtml: string
           try {
-            siteHtml = await generateSite(placeInput)
+            siteHtml = await generateSite(placeInput, extraInstructions || undefined)
           } catch (err) {
             send({ type: 'error', message: `Site generation failed for ${lead.business}: ${String(err)}` })
             continue
