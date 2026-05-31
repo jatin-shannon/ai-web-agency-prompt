@@ -1,9 +1,16 @@
 export interface Communication {
-  id: 'cold-call' | 'text-day0' | 'text-day2' | 'text-day5' | 'text-day10'
+  id: 'cold-call' | 'text-day0' | 'text-day2' | 'text-day5' | 'text-day10' | 'email-intro'
   label: string
   content: string
   approved: boolean
   sent: boolean
+}
+
+export interface ActivityEntry {
+  id: string
+  ts: string
+  type: 'call' | 'text' | 'email' | 'meeting' | 'note'
+  text: string
 }
 
 export interface Lead {
@@ -23,6 +30,9 @@ export interface Lead {
   communications: Communication[]
   openingHours?: string[]   // stored during discovery for later site generation
   htmlContent?: string
+  notes?: string
+  followUpDate?: string      // ISO date string e.g. "2026-06-15"
+  activityLog?: ActivityEntry[]
 }
 
 export interface PlaceResult {

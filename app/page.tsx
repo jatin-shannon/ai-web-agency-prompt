@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Lead, Communication, PipelineEvent } from '@/types'
+import { Lead, Communication, ActivityEntry, PipelineEvent } from '@/types'
 
 const STATUS_OPTIONS = [
   '🔴 Not Contacted',
@@ -29,7 +29,8 @@ function CommPanel({
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries((lead.communications ?? []).map(c => [c.id, c.content]))
   )
-  const isSms = (id: Communication['id']) => id !== 'cold-call'
+  const isSms = (id: Communication['id']) => id !== 'cold-call' && id !== 'email-intro'
+  const isEmail = (id: Communication['id']) => id === 'email-intro'
   const save = (comm: Communication) =>
     onUpdate(lead.id, comm.id, { content: drafts[comm.id] ?? comm.content })
   const toggleApprove = (comm: Communication) =>
@@ -85,6 +86,9 @@ function CommPanel({
                   {draft.length}/160 chars{overLimit ? ' — over SMS limit' : ''}
                 </div>
               )}
+              {isEmail(comm.id) && (
+                <div className="text-xs text-gray-500">{draft.split(/\s+/).filter(Boolean).length} words</div>
+              )}
               <div className="flex gap-2 mt-auto">
                 <button
                   onClick={() => toggleApprove(comm)}
@@ -114,6 +118,116 @@ function CommPanel({
           Review and approve each script before contacting this business.
         </p>
       )}
+    </div>
+  )
+}
+
+const ACTIVITY_ICONS: Record<ActivityEntry['type'], string> = {
+  call: '📞', text: '💬', email: '📧', meeting: '🤝', note: '📝',
+}
+
+function NotePanel({
+  lead,
+  onUpdateNotes,
+  onAddActivity,
+  onSetFollowUp,
+}: {
+  lead: Lead
+  onUpdateNotes: (id: string, notes: string) => void
+  onAddActivity: (id: string, entry: ActivityEntry) => void
+  onSetFollowUp: (id: string, date: string | null) => void
+}) {
+  const [notes, setNotes] = useState(lead.notes ?? '')
+  const [activityText, setActivityText] = useState('')
+  const [activityType, setActivityType] = useState<ActivityEntry['type']>('call')
+
+  const logActivity = () => {
+    if (!activityText.trim()) return
+    const entry: ActivityEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ts: new Date().toISOString(),
+      type: activityType,
+      text: activityText.trim(),
+    }
+    onAddActivity(lead.id, entry)
+    setActivityText('')
+  }
+
+  const log = lead.activityLog ?? []
+
+  return (
+    <div className="px-6 py-5 border-t border-gray-800 space-y-5">
+      {/* Follow-up date */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold text-gray-400 w-28 shrink-0">Next follow-up</span>
+        <input
+          type="date"
+          value={lead.followUpDate ?? ''}
+          onChange={e => onSetFollowUp(lead.id, e.target.value || null)}
+          className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500"
+        />
+        {lead.followUpDate && (
+          <button onClick={() => onSetFollowUp(lead.id, null)} className="text-xs text-gray-500 hover:text-gray-300">Clear</button>
+        )}
+      </div>
+
+      {/* Notes */}
+      <div>
+        <div className="text-xs font-semibold text-gray-400 mb-1.5">Notes</div>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          onBlur={() => onUpdateNotes(lead.id, notes)}
+          rows={3}
+          placeholder="Anything worth remembering about this lead…"
+          className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 resize-none focus:outline-none focus:border-blue-500"
+        />
+      </div>
+
+      {/* Activity log */}
+      <div>
+        <div className="text-xs font-semibold text-gray-400 mb-2">Activity log</div>
+        {log.length > 0 && (
+          <div className="mb-3 space-y-1.5 max-h-40 overflow-y-auto">
+            {[...log].reverse().map(entry => (
+              <div key={entry.id} className="flex items-start gap-2 text-xs">
+                <span className="shrink-0 mt-0.5">{ACTIVITY_ICONS[entry.type]}</span>
+                <span className="text-gray-300 flex-1">{entry.text}</span>
+                <span className="text-gray-600 shrink-0 whitespace-nowrap">
+                  {new Date(entry.ts).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <select
+            value={activityType}
+            onChange={e => setActivityType(e.target.value as ActivityEntry['type'])}
+            className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-gray-300 focus:outline-none"
+          >
+            <option value="call">📞 Call</option>
+            <option value="text">💬 Text</option>
+            <option value="email">📧 Email</option>
+            <option value="meeting">🤝 Meeting</option>
+            <option value="note">📝 Note</option>
+          </select>
+          <input
+            value={activityText}
+            onChange={e => setActivityText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && logActivity()}
+            placeholder="What happened?"
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            onClick={logActivity}
+            disabled={!activityText.trim()}
+            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-md text-xs font-medium text-gray-200 transition-colors"
+          >
+            Log
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -359,16 +473,63 @@ export default function Home() {
     }
   }
 
-  const updateStatus = async (id: string, status: string) => {
+  const patchLead = (body: object) =>
+    fetch('/api/leads', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+  const updateStatus = (id: string, status: string) => {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l))
-    await fetch('/api/leads', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status }),
-    })
+    patchLead({ id, status })
   }
 
-  const updateComm = async (leadId: string, commId: string, patch: Partial<Communication>) => {
+  const updateNotes = (id: string, notes: string) => {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, notes } : l))
+    patchLead({ id, notes })
+  }
+
+  const setFollowUp = (id: string, followUpDate: string | null) => {
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, followUpDate: followUpDate ?? undefined } : l))
+    patchLead({ id, followUpDate })
+  }
+
+  const addActivity = (id: string, entry: ActivityEntry) => {
+    setLeads(prev => prev.map(l => l.id === id
+      ? { ...l, activityLog: [...(l.activityLog ?? []), entry] }
+      : l,
+    ))
+    patchLead({ id, activityEntry: entry })
+  }
+
+  const shareUrl = (lead: Lead) => {
+    const base = `${typeof window !== 'undefined' ? window.location.origin : ''}${lead.siteUrl ?? ''}`
+    return lead.shareToken ? `${base}?token=${lead.shareToken}` : base
+  }
+
+  const copyAllShareLinks = async () => {
+    const built = leads.filter(l => l.stage === 'built' && l.siteUrl)
+    const text = built.map(l => `${l.business}: ${shareUrl(l)}`).join('\n')
+    await navigator.clipboard.writeText(text).catch(() => {})
+  }
+
+  const exportCSV = () => {
+    const headers = ['Business', 'Type', 'Phone', 'Address', 'Rating', 'Reviews', 'Status', 'Site URL', 'Best Call Time', 'Follow-Up Date', 'Notes']
+    const rows = leads.filter(l => l.stage === 'built').map(l => [
+      l.business, l.type, l.phone, l.address, l.rating, l.reviews,
+      l.status, l.siteUrl ? shareUrl(l) : '',
+      l.bestCallTime, l.followUpDate ?? '', l.notes ?? '',
+    ])
+    const csv = [headers, ...rows]
+      .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const updateComm = (leadId: string, commId: string, patch: Partial<Communication>) => {
     setLeads(prev =>
       prev.map(l =>
         l.id !== leadId ? l : {
@@ -377,11 +538,7 @@ export default function Home() {
         },
       ),
     )
-    await fetch('/api/leads', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: leadId, commId, ...patch }),
-    })
+    patchLead({ id: leadId, commId, ...patch })
   }
 
   const toggleSelectLead = (id: string) => {
@@ -651,6 +808,22 @@ export default function Home() {
                   Build remaining {unbuiltLeads.length}
                 </button>
               )}
+              {builtLeads.length > 0 && (
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={copyAllShareLinks}
+                    className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs font-medium text-gray-300 transition-colors whitespace-nowrap"
+                  >
+                    ⎘ Copy all links
+                  </button>
+                  <button
+                    onClick={exportCSV}
+                    className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs font-medium text-gray-300 transition-colors whitespace-nowrap"
+                  >
+                    ↓ Export CSV
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -707,6 +880,17 @@ export default function Home() {
                             <div className="font-medium text-sm">{lead.business}</div>
                             <div className="text-gray-500 text-xs mt-0.5">{lead.address}</div>
                             <div className="text-gray-600 text-xs mt-0.5 italic">{lead.hook}</div>
+                            {lead.followUpDate && (() => {
+                              const d = new Date(lead.followUpDate)
+                              const today = new Date(); today.setHours(0,0,0,0)
+                              const isPast = d < today
+                              const isToday = d.toDateString() === today.toDateString()
+                              return (
+                                <div className={`text-xs mt-1 font-medium ${isPast ? 'text-red-400' : isToday ? 'text-yellow-400' : 'text-blue-400'}`}>
+                                  {isPast ? '⚠ Follow-up overdue' : isToday ? '📅 Follow up today' : `📅 ${d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`}
+                                </div>
+                              )
+                            })()}
                           </td>
                           <td className="px-4 py-4 text-gray-400 text-xs">{lead.type}</td>
                           <td className="px-4 py-4">
@@ -735,11 +919,7 @@ export default function Home() {
                                       View Site &rarr;
                                     </a>
                                     <button
-                                      onClick={() => {
-                                        const base = `${window.location.origin}${lead.siteUrl}`
-                                        const url = lead.shareToken ? `${base}?token=${lead.shareToken}` : base
-                                        navigator.clipboard.writeText(url).catch(() => {})
-                                      }}
+                                      onClick={() => navigator.clipboard.writeText(shareUrl(lead)).catch(() => {})}
                                       className="text-xs text-gray-500 hover:text-gray-300 transition-colors text-left"
                                     >
                                       ⎘ Copy share link
@@ -808,9 +988,15 @@ export default function Home() {
                           )}
                         </tr>
                         {isExpanded && isBuilt && (
-                          <tr key={`${lead.id}-comms`} className="border-b border-gray-700 bg-gray-900/60">
+                          <tr key={`${lead.id}-expanded`} className="border-b border-gray-700 bg-gray-900/60">
                             <td colSpan={10} className="p-0">
                               <CommPanel lead={lead} onUpdate={updateComm} />
+                              <NotePanel
+                                lead={lead}
+                                onUpdateNotes={updateNotes}
+                                onAddActivity={addActivity}
+                                onSetFollowUp={setFollowUp}
+                              />
                             </td>
                           </tr>
                         )}
