@@ -57,5 +57,13 @@ export async function GET(
     } catch {}
   }
 
+  // Lead exists but HTML isn't stored — built before htmlContent was persisted to Firestore.
+  if (lead) {
+    return new Response(
+      '<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:4rem"><h2>Site needs a rebuild</h2><p>This site was built before persistent storage was set up. Open the dashboard and click <strong>↺ Regenerate</strong> to rebuild it.</p></body></html>',
+      { status: 404, headers: htmlHeaders },
+    )
+  }
+
   return new Response('Site not found', { status: 404 })
 }
