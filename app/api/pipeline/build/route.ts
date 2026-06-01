@@ -109,13 +109,14 @@ export async function POST(request: NextRequest) {
             shareToken: lead.shareToken ?? randomBytes(16).toString('hex'),
             communications,
             siteScore,
-            htmlContent: process.env.BLOB_READ_WRITE_TOKEN ? undefined : siteHtml,
+            htmlContent: siteHtml,  // always stored — Blob is CDN cache, not the only copy
           }
 
           await saveLead(updatedLead)
           built.push(updatedLead)
 
-          // Persist lead JSON to Blob so results survive if the browser tab was closed.
+          // Also upload to Blob CDN for faster delivery on repeat views.
+          // Strip htmlContent from Blob JSON to keep it small (Firestore is the source of truth).
           if (process.env.BLOB_READ_WRITE_TOKEN) {
             try {
               const { htmlContent: _j, ...leadForBlob } = updatedLead
